@@ -2,7 +2,7 @@ import random
 import numpy as np
 import argparse
 import re
-import pandas as pd
+import polars as pl
 from Bio import pairwise2
 
 def read_sequence(file_name):
@@ -12,7 +12,7 @@ def read_sequence(file_name):
 
 def read_pos_file(file_path):
     """Read and parse a BED file, returning a DataFrame containing start positions with integer type."""
-    return pd.read_csv(file_path, sep="\t", header=None, usecols=[1], names=["start"], dtype={"start": int})
+    return pl.read_csv(file_path, separator="\t", has_header=False, new_columns=["chr", "start", "end"]).select("start")
 
 def adjust_pos_coordinates(pos1, pos2):
     """Adjust pos1 coordinates based on pos2 instructions (INS/DEL)."""
@@ -67,7 +67,7 @@ def find_pairwise_points(align, pos):
 def introduce_mutations(sequence, generation, num_generations, unit_data):
     mutated_sequence = list(sequence)
     mutation_records = []
-    adjusted_pos = unit_data["start"].tolist()  # Corrected to use column name "start"
+    adjusted_pos = unit_data.get_column("start").to_list()  # Corrected to use column name "start"
 
     for _ in range(num_generations):
         generation += 1
@@ -91,22 +91,22 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
             indel_type = random.choice(["INS", "DEL"])
 
             copy_num = np.random.poisson(7.6)
-            idx_unit_start = unit_data[unit_data["start"] <= idx].tail(1)["start"].values[0]
-            idx_unit_end = unit_data[unit_data["start"] > idx].head(1)["start"].values[0]
+            idx_unit_start = unit_data.filter(pl.col("start") <= idx).tail(1).get_column("start").item()
+            idx_unit_end = unit_data.filter(pl.col("start") > idx).head(1).get_column("start").item()
 
-            if pd.isna(idx_unit_start) or pd.isna(idx_unit_end):
+            if idx_unit_start is None or idx_unit_end is None:
                 continue
             idx_unit_seq = get_sequence(mutated_sequence, idx_unit_start, idx_unit_end)
 
-            if unit_data[unit_data["start"] > idx].head(copy_num).empty:
+            if unit_data.filter(pl.col("start") > idx).head(copy_num).height == 0:
                 continue
-            idx_pairwise_unit_start = unit_data[unit_data["start"] > idx].head(copy_num).tail(1)["start"].values[0]
+            idx_pairwise_unit_start = unit_data.filter(pl.col("start") > idx).head(copy_num).tail(1).get_column("start").item()
 
-            if unit_data[unit_data["start"] > idx].head(copy_num + 1).empty:
+            if unit_data.filter(pl.col("start") > idx).head(copy_num + 1).height == 0:
                 continue
-            idx_pairwise_unit_end = unit_data[unit_data["start"] > idx].head(copy_num + 1).tail(1)["start"].values[0]
+            idx_pairwise_unit_end = unit_data.filter(pl.col("start") > idx).head(copy_num + 1).tail(1).get_column("start").item()
 
-            if pd.isna(idx_pairwise_unit_start) or pd.isna(idx_pairwise_unit_end):
+            if idx_pairwise_unit_start is None or idx_pairwise_unit_end is None:
                 continue
             idx_pairwise_unit_seq = get_sequence(mutated_sequence, idx_pairwise_unit_start, idx_pairwise_unit_end)
 
@@ -138,7 +138,7 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
             # Update adjusted_pos
             indel_records = [(generation, indel_type, idx, idx_pairwise_abs)]
             adjusted_pos = sorted(adjust_pos_coordinates(adjusted_pos, indel_records))
-            unit_data = pd.DataFrame(adjusted_pos, columns=["start"])
+            unit_data = pl.DataFrame({"start": adjusted_pos})
 
         actual_conversions = 0
         num_conversions = np.random.poisson(1)
@@ -147,37 +147,37 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
             conversion_size = np.random.poisson(20)
             end = start + conversion_size
 
-            start_unit_start = unit_data[unit_data["start"] <= start].tail(1)["start"].values[0]
-            if unit_data[unit_data["start"] > start].empty:
+            start_unit_start = unit_data.filter(pl.col("start") <= start).tail(1).get_column("start").item()
+            if unit_data.filter(pl.col("start") > start).height == 0:
                 continue
-            start_unit_end = unit_data[unit_data["start"] > start].head(1)["start"].values[0]
-            end_unit_start = unit_data[unit_data["start"] <= end].tail(1)["start"].values[0]
-            if unit_data[unit_data["start"] > end].empty:
+            start_unit_end = unit_data.filter(pl.col("start") > start).head(1).get_column("start").item()
+            end_unit_start = unit_data.filter(pl.col("start") <= end).tail(1).get_column("start").item()
+            if unit_data.filter(pl.col("start") > end).height == 0:
                 continue
-            end_unit_end = unit_data[unit_data["start"] > end].head(1)["start"].values[0]
+            end_unit_end = unit_data.filter(pl.col("start") > end).head(1).get_column("start").item()
 
-            if pd.isna(start_unit_start) or pd.isna(start_unit_end) or pd.isna(end_unit_start) or pd.isna(end_unit_end):
+            if start_unit_start is None or start_unit_end is None or end_unit_start is None or end_unit_end is None:
                 continue
             start_unit_seq = get_sequence(mutated_sequence, start_unit_start, start_unit_end)
             end_unit_seq = get_sequence(mutated_sequence, end_unit_start, end_unit_end)
 
-            if unit_data[unit_data["start"] > start].head(1).empty:
+            if unit_data.filter(pl.col("start") > start).head(1).height == 0:
                 continue
-            start_pairwise_unit_start = unit_data[unit_data["start"] > start].head(1).tail(1)["start"].values[0]
+            start_pairwise_unit_start = unit_data.filter(pl.col("start") > start).head(1).tail(1).get_column("start").item()
 
-            if unit_data[unit_data["start"] > start].head(1 + 1).empty:
+            if unit_data.filter(pl.col("start") > start).head(1 + 1).height == 0:
                 continue
-            start_pairwise_unit_end = unit_data[unit_data["start"] > start].head(1 + 1).tail(1)["start"].values[0]
+            start_pairwise_unit_end = unit_data.filter(pl.col("start") > start).head(1 + 1).tail(1).get_column("start").item()
 
-            if unit_data[unit_data["start"] > end].head(1).empty:
+            if unit_data.filter(pl.col("start") > end).head(1).height == 0:
                 continue
-            end_pairwise_unit_start = unit_data[unit_data["start"] > end].head(1).tail(1)["start"].values[0]
+            end_pairwise_unit_start = unit_data.filter(pl.col("start") > end).head(1).tail(1).get_column("start").item()
 
-            if unit_data[unit_data["start"] > end].head(1 + 1).empty:
+            if unit_data.filter(pl.col("start") > end).head(1 + 1).height == 0:
                 continue
-            end_pairwise_unit_end = unit_data[unit_data["start"] > end].head(1 + 1).tail(1)["start"].values[0]
+            end_pairwise_unit_end = unit_data.filter(pl.col("start") > end).head(1 + 1).tail(1).get_column("start").item()
 
-            if pd.isna(start_pairwise_unit_start) or pd.isna(start_pairwise_unit_end) or pd.isna(end_pairwise_unit_start) or pd.isna(end_pairwise_unit_end):
+            if start_pairwise_unit_start is None or start_pairwise_unit_end is None or end_pairwise_unit_start is None or end_pairwise_unit_end is None:
                 continue
             start_pairwise_unit_seq = get_sequence(mutated_sequence, start_pairwise_unit_start, start_pairwise_unit_end)
             end_pairwise_unit_seq = get_sequence(mutated_sequence, end_pairwise_unit_start, end_pairwise_unit_end)
@@ -231,7 +231,7 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
                         conversion_indel_records = [(generation, "DEL", end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start), end_pairwise_abs)]
 
                 adjusted_pos = sorted(adjust_pos_coordinates(adjusted_pos, conversion_indel_records))
-                unit_data = pd.DataFrame(adjusted_pos, columns=["start"])
+                unit_data = pl.DataFrame({"start": adjusted_pos})
 
     return "".join(mutated_sequence), mutation_records, adjusted_pos
 
