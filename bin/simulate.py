@@ -243,8 +243,12 @@ if __name__ == "__main__":
     parser.add_argument('output_file', help='Output FASTA file')
     parser.add_argument('mutation_record', help='Mutation record output file')
     parser.add_argument('adjusted_pos_output', help='Adjusted positions output file')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode with breakpoint')
 
     args = parser.parse_args()
+
+    if args.debug == True:
+        breakpoint()
 
     input_file = args.input_file
     match = re.match(r'1\.fasta/(\d+)?generation\.out\.fa', input_file)
