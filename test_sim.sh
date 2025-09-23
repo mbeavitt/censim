@@ -2,6 +2,8 @@
 
 set -eu
 
+mkdir -p output/fasta output/records output/generation_unit_pos
+
 # Test Simulation (10000 generations)
 py-spy record -o profile.svg -- python ./bin/simulate.py \
     ./data/15000copy_cen178.seq 10000 \
