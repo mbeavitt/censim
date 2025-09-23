@@ -244,8 +244,15 @@ if __name__ == "__main__":
     parser.add_argument('mutation_record', help='Mutation record output file')
     parser.add_argument('adjusted_pos_output', help='Adjusted positions output file')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode with breakpoint')
+    parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
 
     args = parser.parse_args()
+
+    # Set random seed for reproducibility
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        print(f"Random seed set to: {args.seed}")
 
     if args.debug == True:
         breakpoint()
