@@ -12,7 +12,7 @@ def read_sequence(file_name):
 
 def read_pos_file(file_path):
     """Read and parse a BED file, returning a DataFrame containing start positions with integer type."""
-    return pl.read_csv(file_path, separator="\t", has_header=False, new_columns=["chr", "start", "end"]).select("start")
+    return pl.read_csv(file_path, separator="\t", has_header=False, new_columns=["chr", "start"]).select("start")
 
 def adjust_pos_coordinates(pos1, pos2):
     """Adjust pos1 coordinates based on pos2 instructions (INS/DEL)."""
