@@ -1,6 +1,6 @@
 import random
 import numpy as np
-import sys
+import argparse
 import re
 import pandas as pd
 from Bio import pairwise2
@@ -236,18 +236,24 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
     return "".join(mutated_sequence), mutation_records, adjusted_pos
 
 if __name__ == "__main__":
-    if len(sys.argv) != 7:
-        print("Usage: python simulate.py input.fa num_generations path_to_unit_data_file output.fa mutation_record.txt adjusted_pos_output.txt")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Simulate mutations in DNA sequences')
+    parser.add_argument('input_file', help='Input FASTA file')
+    parser.add_argument('num_generations', type=int, help='Number of generations to simulate')
+    parser.add_argument('unit_data_file', help='Path to unit data file')
+    parser.add_argument('output_file', help='Output FASTA file')
+    parser.add_argument('mutation_record', help='Mutation record output file')
+    parser.add_argument('adjusted_pos_output', help='Adjusted positions output file')
 
-    input_file = sys.argv[1]
+    args = parser.parse_args()
+
+    input_file = args.input_file
     match = re.match(r'1\.fasta/(\d+)?generation\.out\.fa', input_file)
     generation = int(match.group(1)) if match else 0
-    num_generations = int(sys.argv[2])
-    unit_data_file = sys.argv[3]
-    output_file = sys.argv[4]
-    record_output = sys.argv[5]
-    adjusted_pos_output = sys.argv[6]
+    num_generations = args.num_generations
+    unit_data_file = args.unit_data_file
+    output_file = args.output_file
+    record_output = args.mutation_record
+    adjusted_pos_output = args.adjusted_pos_output
 
     original_sequence = read_sequence(input_file)
 
