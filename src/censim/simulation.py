@@ -72,28 +72,47 @@ def read_pos_file(file_path):
 
 def adjust_pos_coordinates(pos1, pos2):
     """Adjust pos1 coordinates based on pos2 instructions (INS/DEL)."""
-    adjusted_pos1_temp1 = pos1
+    if not pos2:
+        return pos1
+
+    # Convert to numpy array for vectorized operations
+    positions = np.array(pos1, dtype=np.int32)
 
     for _, ins_del, p1, p2 in pos2:
-        adjusted_pos1_temp2 = []
-        for pos in adjusted_pos1_temp1:
-            if ins_del == "DEL":
-                if pos < p1:
-                    adjusted_pos1_temp2.append(pos)  # no change to the positions smaller than p1
-                elif p1 <= pos < p2:
-                    continue  # delete positions between p1 and p2
-                else:  # p2 <= pos
-                    adjusted_pos1_temp2.append(pos - (p2 - p1))
-            elif ins_del == "INS":
-                if pos < p1:
-                    adjusted_pos1_temp2.append(pos)  # no change to the positions smaller than p1
-                elif p1 <= pos < p2:
-                    adjusted_pos1_temp2.append(pos)  # insert/duplicate the positions between p1 and p2
-                    adjusted_pos1_temp2.append(pos + (p2 - p1))
-                else:  # p2 <= pos
-                    adjusted_pos1_temp2.append(pos + (p2 - p1))
-        adjusted_pos1_temp1 = adjusted_pos1_temp2
-    return adjusted_pos1_temp1
+        if ins_del == "DEL":
+            # Create boolean masks for each condition
+            mask_lt_p1 = positions < p1
+            mask_between = (positions >= p1) & (positions < p2)
+            mask_gte_p2 = positions >= p2
+
+            # Apply transformations using masks
+            # Positions < p1: no change
+            # Positions between p1 and p2: remove (handled by not including them)
+            # Positions >= p2: subtract (p2 - p1)
+            new_positions = positions[mask_lt_p1 | mask_gte_p2].copy()
+            new_positions[positions[mask_lt_p1 | mask_gte_p2] >= p2] -= (p2 - p1)
+            positions = new_positions
+
+        elif ins_del == "INS":
+            # Create boolean masks
+            mask_lt_p1 = positions < p1
+            mask_between = (positions >= p1) & (positions < p2)
+            mask_gte_p2 = positions >= p2
+
+            # Calculate new positions
+            pos_lt_p1 = positions[mask_lt_p1]  # no change
+            pos_between = positions[mask_between]  # duplicate with offset
+            pos_gte_p2 = positions[mask_gte_p2] + (p2 - p1)  # shift by insertion size
+
+            # Concatenate: original + duplicated + shifted
+            positions = np.concatenate([
+                pos_lt_p1,
+                pos_between,
+                pos_between + (p2 - p1),
+                pos_gte_p2
+            ])
+
+    return positions.tolist()
 
 def get_sequence(sequence, start, end):
     """Retrieve the sequence from the given sequence string, starting from 'start' position (0-based inclusive) to 'end' position (0-based exclusive)."""
