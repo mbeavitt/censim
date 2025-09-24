@@ -5,6 +5,20 @@ import re
 import pandas as pd
 from Bio import Align
 
+# Global aligner instance to avoid recreation overhead
+_global_aligner = None
+
+def get_aligner():
+    """Get or create the global pairwise aligner instance."""
+    global _global_aligner
+    if _global_aligner is None:
+        _global_aligner = Align.PairwiseAligner()
+        _global_aligner.match_score = 2
+        _global_aligner.mismatch_score = -1
+        _global_aligner.open_gap_score = -10
+        _global_aligner.extend_gap_score = -1
+    return _global_aligner
+
 def read_sequence(file_name):
     with open(file_name, "r") as file:
         sequence = file.read().strip()
@@ -45,11 +59,7 @@ def get_sequence(sequence, start, end):
 
 def pairwise_alignment(seq1, seq2):
     """Perform pairwise alignment between two sequences using global alignment with affine gap penalties."""
-    aligner = Align.PairwiseAligner()
-    aligner.match_score = 2
-    aligner.mismatch_score = -1
-    aligner.open_gap_score = -10
-    aligner.extend_gap_score = -1
+    aligner = get_aligner()
     alignments = aligner.align(seq1, seq2)
     alignment = alignments[0]
     return (str(alignment[0]), str(alignment[1]), alignment.score, 0, len(seq1), len(seq2))

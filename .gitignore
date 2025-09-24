@@ -1,6 +1,7 @@
 past_sims/
 *.svg
 output/
+test_output/
 logs/
 
 # Python cache files
