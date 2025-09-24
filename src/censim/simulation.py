@@ -211,7 +211,7 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
 
             # Update adjusted_pos
             indel_records = [(generation, indel_type, idx, idx_pairwise_abs)]
-            adjusted_pos = np.sort(np.array(adjust_pos_coordinates(adjusted_pos.tolist(), indel_records)))
+            adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), indel_records))
 
         actual_conversions = 0
         num_conversions = np.random.poisson(1)
@@ -286,8 +286,10 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
                     elif (end - end_unit_start) < (end_pairwise_abs - end_pairwise_unit_start): #DEL
                         conversion_indel_records = [(generation, "DEL", end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start), end_pairwise_abs)]
 
-                adjusted_pos = np.sort(np.array(adjust_pos_coordinates(adjusted_pos.tolist(), conversion_indel_records)))
+                adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), conversion_indel_records))
 
+    # Sort positions once at the end
+    adjusted_pos = np.sort(adjusted_pos)
     return "".join(mutated_sequence), mutation_records, adjusted_pos.tolist()
 
 if __name__ == "__main__":
