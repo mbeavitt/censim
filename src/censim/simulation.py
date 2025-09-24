@@ -153,6 +153,9 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
     for _ in range(num_generations):
         generation += 1
 
+        # Collect all position adjustments for this generation
+        generation_indel_records = []
+
         actual_snps = 0
         num_snps = np.random.poisson(0.1)
         while actual_snps < num_snps:
@@ -209,9 +212,8 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
                 del mutated_sequence[idx:idx_pairwise_abs]
                 actual_indels += 1
 
-            # Update adjusted_pos
-            indel_records = [(generation, indel_type, idx, idx_pairwise_abs)]
-            adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), indel_records))
+            # Collect indel record for batch processing
+            generation_indel_records.append((generation, indel_type, idx, idx_pairwise_abs))
 
         actual_conversions = 0
         num_conversions = np.random.poisson(1)
@@ -286,7 +288,12 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
                     elif (end - end_unit_start) < (end_pairwise_abs - end_pairwise_unit_start): #DEL
                         conversion_indel_records = [(generation, "DEL", end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start), end_pairwise_abs)]
 
-                adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), conversion_indel_records))
+                # Collect conversion indel records for batch processing
+                generation_indel_records.extend(conversion_indel_records)
+
+        # Apply all position adjustments for this generation in one batch
+        if generation_indel_records:
+            adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), generation_indel_records))
 
     # Sort positions once at the end
     adjusted_pos = np.sort(adjusted_pos)
