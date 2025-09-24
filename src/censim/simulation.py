@@ -3,6 +3,7 @@ import numpy as np
 import argparse
 import re
 import pandas as pd
+import bisect
 from Bio import Align
 
 # Global aligner instance to avoid recreation overhead
@@ -18,6 +19,47 @@ def get_aligner():
         _global_aligner.open_gap_score = -10
         _global_aligner.extend_gap_score = -1
     return _global_aligner
+
+def find_unit_boundaries(unit_positions, idx):
+    """Fast unit boundary lookup using binary search."""
+    if len(unit_positions) == 0:
+        return None, None
+
+    # Find the last unit start <= idx
+    pos = bisect.bisect_right(unit_positions, idx) - 1
+    if pos < 0:
+        return None, None
+
+    unit_start = unit_positions[pos]
+
+    # Find the next unit start > idx
+    if pos + 1 < len(unit_positions):
+        unit_end = unit_positions[pos + 1]
+    else:
+        return unit_start, None
+
+    return unit_start, unit_end
+
+def find_nth_unit_after(unit_positions, idx, n):
+    """Find the nth unit after the given index."""
+    if len(unit_positions) == 0 or n <= 0:
+        return None, None
+
+    # Find first unit start > idx
+    pos = bisect.bisect_right(unit_positions, idx)
+
+    if pos + n - 1 >= len(unit_positions):
+        return None, None
+
+    start_pos = pos + n - 1
+    unit_start = unit_positions[start_pos]
+
+    if start_pos + 1 < len(unit_positions):
+        unit_end = unit_positions[start_pos + 1]
+    else:
+        return unit_start, None
+
+    return unit_start, unit_end
 
 def read_sequence(file_name):
     with open(file_name, "r") as file:
@@ -83,7 +125,11 @@ def find_pairwise_points(align, pos):
 def introduce_mutations(sequence, generation, num_generations, unit_data):
     mutated_sequence = list(sequence)
     mutation_records = []
-    adjusted_pos = unit_data["start"].tolist()  # Corrected to use column name "start"
+    # Convert to sorted NumPy array for fast binary search
+    if isinstance(unit_data, pd.DataFrame):
+        adjusted_pos = np.sort(unit_data["start"].values)
+    else:
+        adjusted_pos = np.sort(np.array(adjusted_pos))
 
     for _ in range(num_generations):
         generation += 1
@@ -107,22 +153,15 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
             indel_type = random.choice(["INS", "DEL"])
 
             copy_num = np.random.poisson(7.6)
-            idx_unit_start = unit_data[unit_data["start"] <= idx].tail(1)["start"].values[0]
-            idx_unit_end = unit_data[unit_data["start"] > idx].head(1)["start"].values[0]
+            idx_unit_start, idx_unit_end = find_unit_boundaries(adjusted_pos, idx)
 
-            if pd.isna(idx_unit_start) or pd.isna(idx_unit_end):
+            if idx_unit_start is None or idx_unit_end is None:
                 continue
             idx_unit_seq = get_sequence(mutated_sequence, idx_unit_start, idx_unit_end)
 
-            if unit_data[unit_data["start"] > idx].head(copy_num).empty:
-                continue
-            idx_pairwise_unit_start = unit_data[unit_data["start"] > idx].head(copy_num).tail(1)["start"].values[0]
+            idx_pairwise_unit_start, idx_pairwise_unit_end = find_nth_unit_after(adjusted_pos, idx, copy_num)
 
-            if unit_data[unit_data["start"] > idx].head(copy_num + 1).empty:
-                continue
-            idx_pairwise_unit_end = unit_data[unit_data["start"] > idx].head(copy_num + 1).tail(1)["start"].values[0]
-
-            if pd.isna(idx_pairwise_unit_start) or pd.isna(idx_pairwise_unit_end):
+            if idx_pairwise_unit_start is None or idx_pairwise_unit_end is None:
                 continue
             idx_pairwise_unit_seq = get_sequence(mutated_sequence, idx_pairwise_unit_start, idx_pairwise_unit_end)
 
@@ -153,8 +192,7 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
 
             # Update adjusted_pos
             indel_records = [(generation, indel_type, idx, idx_pairwise_abs)]
-            adjusted_pos = sorted(adjust_pos_coordinates(adjusted_pos, indel_records))
-            unit_data = pd.DataFrame(adjusted_pos, columns=["start"])
+            adjusted_pos = np.sort(np.array(adjust_pos_coordinates(adjusted_pos.tolist(), indel_records)))
 
         actual_conversions = 0
         num_conversions = np.random.poisson(1)
@@ -163,37 +201,20 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
             conversion_size = np.random.poisson(20)
             end = start + conversion_size
 
-            start_unit_start = unit_data[unit_data["start"] <= start].tail(1)["start"].values[0]
-            if unit_data[unit_data["start"] > start].empty:
-                continue
-            start_unit_end = unit_data[unit_data["start"] > start].head(1)["start"].values[0]
-            end_unit_start = unit_data[unit_data["start"] <= end].tail(1)["start"].values[0]
-            if unit_data[unit_data["start"] > end].empty:
-                continue
-            end_unit_end = unit_data[unit_data["start"] > end].head(1)["start"].values[0]
+            start_unit_start, start_unit_end = find_unit_boundaries(adjusted_pos, start)
+            end_unit_start, end_unit_end = find_unit_boundaries(adjusted_pos, end)
 
-            if pd.isna(start_unit_start) or pd.isna(start_unit_end) or pd.isna(end_unit_start) or pd.isna(end_unit_end):
+            if (start_unit_start is None or start_unit_end is None or
+                end_unit_start is None or end_unit_end is None):
                 continue
             start_unit_seq = get_sequence(mutated_sequence, start_unit_start, start_unit_end)
             end_unit_seq = get_sequence(mutated_sequence, end_unit_start, end_unit_end)
 
-            if unit_data[unit_data["start"] > start].head(1).empty:
-                continue
-            start_pairwise_unit_start = unit_data[unit_data["start"] > start].head(1).tail(1)["start"].values[0]
+            start_pairwise_unit_start, start_pairwise_unit_end = find_nth_unit_after(adjusted_pos, start, 1)
+            end_pairwise_unit_start, end_pairwise_unit_end = find_nth_unit_after(adjusted_pos, end, 1)
 
-            if unit_data[unit_data["start"] > start].head(1 + 1).empty:
-                continue
-            start_pairwise_unit_end = unit_data[unit_data["start"] > start].head(1 + 1).tail(1)["start"].values[0]
-
-            if unit_data[unit_data["start"] > end].head(1).empty:
-                continue
-            end_pairwise_unit_start = unit_data[unit_data["start"] > end].head(1).tail(1)["start"].values[0]
-
-            if unit_data[unit_data["start"] > end].head(1 + 1).empty:
-                continue
-            end_pairwise_unit_end = unit_data[unit_data["start"] > end].head(1 + 1).tail(1)["start"].values[0]
-
-            if pd.isna(start_pairwise_unit_start) or pd.isna(start_pairwise_unit_end) or pd.isna(end_pairwise_unit_start) or pd.isna(end_pairwise_unit_end):
+            if (start_pairwise_unit_start is None or start_pairwise_unit_end is None or
+                end_pairwise_unit_start is None or end_pairwise_unit_end is None):
                 continue
             start_pairwise_unit_seq = get_sequence(mutated_sequence, start_pairwise_unit_start, start_pairwise_unit_end)
             end_pairwise_unit_seq = get_sequence(mutated_sequence, end_pairwise_unit_start, end_pairwise_unit_end)
@@ -246,10 +267,9 @@ def introduce_mutations(sequence, generation, num_generations, unit_data):
                     elif (end - end_unit_start) < (end_pairwise_abs - end_pairwise_unit_start): #DEL
                         conversion_indel_records = [(generation, "DEL", end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start), end_pairwise_abs)]
 
-                adjusted_pos = sorted(adjust_pos_coordinates(adjusted_pos, conversion_indel_records))
-                unit_data = pd.DataFrame(adjusted_pos, columns=["start"])
+                adjusted_pos = np.sort(np.array(adjust_pos_coordinates(adjusted_pos.tolist(), conversion_indel_records)))
 
-    return "".join(mutated_sequence), mutation_records, adjusted_pos
+    return "".join(mutated_sequence), mutation_records, adjusted_pos.tolist()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Simulate mutations in DNA sequences')
