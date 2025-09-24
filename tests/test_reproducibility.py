@@ -172,9 +172,7 @@ def test_position_consistency(test_setup):
 @pytest.mark.performance
 def test_small_simulation_performance(test_setup):
     """Test that small simulations complete within reasonable time."""
-    import time
-
-    start_time = time.time()
+    from censim.performance import benchmark_simulation
 
     cmd = [
         "python", "-m", "censim.simulation",
@@ -185,11 +183,70 @@ def test_small_simulation_performance(test_setup):
         "--seed", "42"
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    elapsed = time.time() - start_time
+    duration, result = benchmark_simulation("small_simulation_10gen", cmd, 10, 42)
 
     assert result.returncode == 0, f"Simulation failed: {result.stderr}"
-    assert elapsed < 10, f"Small simulation took too long: {elapsed:.2f}s"
+    assert duration < 10, f"Small simulation took too long: {duration:.2f}s"
+
+
+@pytest.mark.performance
+def test_medium_simulation_performance(test_setup):
+    """Test performance for 100 generation simulation."""
+    from censim.performance import benchmark_simulation
+
+    cmd = [
+        "python", "-m", "censim.simulation",
+        test_setup['input_seq'], "100", test_setup['input_pos'],
+        str(test_setup['test_dir'] / "perf_test_100.fa"),
+        str(test_setup['test_dir'] / "perf_test_100.record.txt"),
+        str(test_setup['test_dir'] / "perf_test_100.pos"),
+        "--seed", "42"
+    ]
+
+    duration, result = benchmark_simulation("medium_simulation_100gen", cmd, 100, 42)
+
+    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    assert duration < 60, f"Medium simulation took too long: {duration:.2f}s"
+
+
+@pytest.mark.performance
+def test_large_simulation_performance(test_setup):
+    """Test performance for 1000 generation simulation."""
+    from censim.performance import benchmark_simulation
+
+    cmd = [
+        "python", "-m", "censim.simulation",
+        test_setup['input_seq'], "1000", test_setup['input_pos'],
+        str(test_setup['test_dir'] / "perf_test_1000.fa"),
+        str(test_setup['test_dir'] / "perf_test_1000.record.txt"),
+        str(test_setup['test_dir'] / "perf_test_1000.pos"),
+        "--seed", "42"
+    ]
+
+    duration, result = benchmark_simulation("large_simulation_1000gen", cmd, 1000, 42)
+
+    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    assert duration < 600, f"Large simulation took too long: {duration:.2f}s"
+
+
+@pytest.mark.performance
+def test_extra_large_simulation_performance(test_setup):
+    """Test performance for 10,000 generation simulation."""
+    from censim.performance import benchmark_simulation
+
+    cmd = [
+        "python", "-m", "censim.simulation",
+        test_setup['input_seq'], "10000", test_setup['input_pos'],
+        str(test_setup['test_dir'] / "perf_test_10000.fa"),
+        str(test_setup['test_dir'] / "perf_test_10000.record.txt"),
+        str(test_setup['test_dir'] / "perf_test_10000.pos"),
+        "--seed", "42"
+    ]
+
+    duration, result = benchmark_simulation("extra_large_simulation_10000gen", cmd, 10000, 42)
+
+    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    assert duration < 3600, f"Extra large simulation took too long: {duration:.2f}s"
 
 
 @pytest.mark.parametrize("seed,generations", [
