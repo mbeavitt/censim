@@ -3,7 +3,7 @@ import numpy as np
 import argparse
 import re
 import pandas as pd
-from Bio import pairwise2
+from Bio import Align
 
 def read_sequence(file_name):
     with open(file_name, "r") as file:
@@ -45,8 +45,14 @@ def get_sequence(sequence, start, end):
 
 def pairwise_alignment(seq1, seq2):
     """Perform pairwise alignment between two sequences using global alignment with affine gap penalties."""
-    alignments = pairwise2.align.globalms(seq1, seq2, 2, -1, -10, -1)
-    return alignments[0]
+    aligner = Align.PairwiseAligner()
+    aligner.match_score = 2
+    aligner.mismatch_score = -1
+    aligner.open_gap_score = -10
+    aligner.extend_gap_score = -1
+    alignments = aligner.align(seq1, seq2)
+    alignment = alignments[0]
+    return (str(alignment[0]), str(alignment[1]), alignment.score, 0, len(seq1), len(seq2))
 
 def find_pairwise_points(align, pos):
     pos_pairwise = -1  # Default to -1 if not found
