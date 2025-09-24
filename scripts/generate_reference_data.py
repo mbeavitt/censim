@@ -36,7 +36,7 @@ def generate_reference_files():
 
         # Run simulation
         cmd = [
-            "python", "./bin/simulate.py",
+            "python", "-m", "censim.simulation",
             "./data/15000copy_cen178.seq", str(generations),
             "./data/15000copy_cen178.178bp.bed.pos",
             str(fasta_ref), str(record_ref), str(pos_ref),

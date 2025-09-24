@@ -22,11 +22,10 @@ def test_setup():
         'test_dir': test_dir,
         'input_seq': "./data/15000copy_cen178.seq",
         'input_pos': "./data/15000copy_cen178.178bp.bed.pos",
-        'simulate_script': "./bin/simulate.py"
     }
 
     # Verify required files exist
-    required_files = [params['input_seq'], params['input_pos'], params['simulate_script']]
+    required_files = [params['input_seq'], params['input_pos']]
     for file_path in required_files:
         if not Path(file_path).exists():
             pytest.fail(f"Required file not found: {file_path}")
@@ -48,7 +47,7 @@ def run_simulation(test_setup, generations, seed, suffix=""):
     pos_out = params['test_dir'] / f"{base_name}.pos"
 
     cmd = [
-        "python", params['simulate_script'],
+        "python", "-m", "censim.simulation",
         params['input_seq'], str(generations), params['input_pos'],
         str(fasta_out), str(record_out), str(pos_out),
         "--seed", str(seed)
@@ -178,7 +177,7 @@ def test_small_simulation_performance(test_setup):
     start_time = time.time()
 
     cmd = [
-        "python", test_setup['simulate_script'],
+        "python", "-m", "censim.simulation",
         test_setup['input_seq'], "10", test_setup['input_pos'],
         str(test_setup['test_dir'] / "perf_test.fa"),
         str(test_setup['test_dir'] / "perf_test.record.txt"),
@@ -216,7 +215,7 @@ def test_seed_none_is_random(test_setup):
 
     # Run without seed twice
     cmd1 = [
-        "python", test_setup['simulate_script'],
+        "python", "-m", "censim.simulation",
         test_setup['input_seq'], str(generations), test_setup['input_pos'],
         str(test_setup['test_dir'] / "random1.fa"),
         str(test_setup['test_dir'] / "random1.record.txt"),
@@ -224,7 +223,7 @@ def test_seed_none_is_random(test_setup):
     ]
 
     cmd2 = [
-        "python", test_setup['simulate_script'],
+        "python", "-m", "censim.simulation",
         test_setup['input_seq'], str(generations), test_setup['input_pos'],
         str(test_setup['test_dir'] / "random2.fa"),
         str(test_setup['test_dir'] / "random2.record.txt"),
