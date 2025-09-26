@@ -141,163 +141,193 @@ def find_pairwise_points(align, pos):
 
     return pos_pairwise
 
-def introduce_mutations(sequence, generation, num_generations, unit_data):
-    mutated_sequence = list(sequence)
-    mutation_records = []
-    # Convert to sorted NumPy array for fast binary search
-    if isinstance(unit_data, pd.DataFrame):
-        adjusted_pos = np.sort(unit_data["start"].values)
+def get_unit_sequences(seq, pos, idx, copy_num):
+    """Get unit sequences for alignment, returns None if invalid."""
+    unit_start, unit_end = find_unit_boundaries(pos, idx)
+    if unit_start is None or unit_end is None:
+        return None
+
+    pair_start, pair_end = find_nth_unit_after(pos, idx, copy_num)
+    if pair_start is None or pair_end is None:
+        return None
+
+    unit_seq = get_sequence(seq, unit_start, unit_end)
+    pair_seq = get_sequence(seq, pair_start, pair_end)
+
+    if len(unit_seq) == 0 or len(pair_seq) == 0:
+        return None
+
+    return unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq
+
+def apply_snp_mutations(seq, generation, records):
+    """Apply SNP mutations to sequence."""
+    count = 0
+    target = np.random.poisson(0.1)
+    bases = ['A', 'T', 'C', 'G']
+
+    while count < target:
+        idx = random.randint(0, len(seq) - 1)
+        available = [b for b in bases if b != seq[idx]]
+        new_base = random.choice(available)
+
+        records.append((generation, "SNP", idx + 1, seq[idx], new_base, "-"))
+        seq[idx] = new_base
+        count += 1
+
+def apply_indel_mutations(seq, generation, pos, records, indel_records):
+    """Apply INDEL mutations to sequence."""
+    count = 0
+    target = np.random.poisson(0.5)
+
+    while count < target:
+        idx = random.randint(0, len(seq) - 1)
+        indel_type = random.choice(["INS", "DEL"])
+        copy_num = np.random.poisson(7.6)
+
+        result = get_unit_sequences(seq, pos, idx, copy_num)
+        if result is None:
+            continue
+
+        unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq = result
+
+        try:
+            align = pairwise_alignment(unit_seq, pair_seq)
+        except IndexError:
+            continue
+
+        pair_pos = find_pairwise_points(align, idx - unit_start)
+        if pair_pos == -1:
+            continue
+
+        pair_abs = int(pair_start) + pair_pos
+
+        if indel_type == "INS":
+            ins_seq = "".join(seq[idx:pair_abs])
+            records.append((generation, indel_type, idx, seq[idx - 1], "".join(seq[idx - 1:pair_abs]), copy_num))
+            seq[idx:idx] = list(ins_seq)
+        else:  # DEL
+            records.append((generation, indel_type, idx, "".join(seq[idx - 1:pair_abs]), "".join(seq[idx - 1]), copy_num))
+            del seq[idx:pair_abs]
+
+        indel_records.append((generation, indel_type, idx, pair_abs))
+        count += 1
+
+def get_conversion_type(donor, receipt):
+    """Determine conversion type based on sequence comparison."""
+    if donor == receipt:
+        return "Identical"
+    elif len(donor) == len(receipt):
+        return "SNP"
     else:
-        adjusted_pos = np.sort(np.array(adjusted_pos))
+        return "INDEL"
+
+def get_conversion_indel_records(generation, start, end, start_unit_start, start_unit_end,
+                               end_unit_start, end_unit_end, start_pair_abs, end_pair_abs,
+                               start_pair_unit_start, start_pair_unit_end,
+                               end_pair_unit_start, end_pair_unit_end, donor, receipt):
+    """Calculate INDEL records for conversions."""
+    records = []
+
+    if start_unit_start == end_unit_start and start_pair_unit_start == end_pair_unit_start:
+        if len(donor) > len(receipt):
+            records.append((generation, "INS", start_pair_abs, start_pair_abs + len(donor) - len(receipt)))
+        else:
+            records.append((generation, "DEL", end_pair_abs + len(receipt) - len(donor), end_pair_abs))
+    else:
+        start_donor_len = start_unit_end - start
+        start_receipt_len = start_pair_unit_end - start_pair_abs
+        if start_donor_len > start_receipt_len:
+            records.append((generation, "INS", start_pair_abs, start_pair_abs + start_donor_len - start_receipt_len))
+        elif start_donor_len < start_receipt_len:
+            records.append((generation, "DEL", start_pair_abs + start_donor_len - start_receipt_len, start_pair_abs))
+
+        end_donor_len = end - end_unit_start
+        end_receipt_len = end_pair_abs - end_pair_unit_start
+        if end_donor_len > end_receipt_len:
+            records.append((generation, "INS", end_pair_abs, end_pair_abs + end_donor_len - end_receipt_len))
+        elif end_donor_len < end_receipt_len:
+            records.append((generation, "DEL", end_pair_abs + end_donor_len - end_receipt_len, end_pair_abs))
+
+    return records
+
+def apply_conversion_mutations(seq, generation, pos, records, indel_records):
+    """Apply conversion mutations to sequence."""
+    count = 0
+    target = np.random.poisson(1)
+
+    while count < target:
+        start = random.randint(0, len(seq) - 1)
+        size = np.random.poisson(20)
+        end = start + size
+
+        start_unit_start, start_unit_end = find_unit_boundaries(pos, start)
+        end_unit_start, end_unit_end = find_unit_boundaries(pos, end)
+
+        if any(x is None for x in [start_unit_start, start_unit_end, end_unit_start, end_unit_end]):
+            continue
+
+        start_pair_unit_start, start_pair_unit_end = find_nth_unit_after(pos, start, 1)
+        end_pair_unit_start, end_pair_unit_end = find_nth_unit_after(pos, end, 1)
+
+        if any(x is None for x in [start_pair_unit_start, start_pair_unit_end, end_pair_unit_start, end_pair_unit_end]):
+            continue
+
+        start_unit_seq = get_sequence(seq, start_unit_start, start_unit_end)
+        end_unit_seq = get_sequence(seq, end_unit_start, end_unit_end)
+        start_pair_seq = get_sequence(seq, start_pair_unit_start, start_pair_unit_end)
+        end_pair_seq = get_sequence(seq, end_pair_unit_start, end_pair_unit_end)
+
+        if any(len(s) == 0 for s in [start_unit_seq, end_unit_seq, start_pair_seq, end_pair_seq]):
+            continue
+
+        try:
+            align1 = pairwise_alignment(start_unit_seq, start_pair_seq)
+            align2 = pairwise_alignment(end_unit_seq, end_pair_seq)
+        except IndexError:
+            continue
+
+        start_pair = find_pairwise_points(align1, start - start_unit_start)
+        end_pair = find_pairwise_points(align2, end - end_unit_start)
+
+        if start_pair == -1 or end_pair == -1:
+            continue
+
+        start_pair_abs = int(start_pair_unit_start) + start_pair
+        end_pair_abs = int(end_pair_unit_start) + end_pair
+
+        donor = "".join(seq[start:end])
+        receipt = "".join(seq[start_pair_abs:end_pair_abs])
+        conv_type = get_conversion_type(donor, receipt)
+
+        records.append((generation, "Conversion", start_pair_abs, receipt, donor, conv_type))
+        count += 1
+
+        if conv_type == "INDEL":
+            conv_indels = get_conversion_indel_records(
+                generation, start, end, start_unit_start, start_unit_end,
+                end_unit_start, end_unit_end, start_pair_abs, end_pair_abs,
+                start_pair_unit_start, start_pair_unit_end,
+                end_pair_unit_start, end_pair_unit_end, donor, receipt
+            )
+            indel_records.extend(conv_indels)
+
+def introduce_mutations(sequence, generation, num_generations, unit_data):
+    seq = list(sequence)
+    records = []
+    pos = np.sort(unit_data["start"].values if isinstance(unit_data, pd.DataFrame) else np.array(unit_data))
 
     for _ in range(num_generations):
         generation += 1
+        indel_records = []
 
-        # Collect all position adjustments for this generation
-        generation_indel_records = []
+        apply_snp_mutations(seq, generation, records)
+        apply_indel_mutations(seq, generation, pos, records, indel_records)
+        apply_conversion_mutations(seq, generation, pos, records, indel_records)
 
-        actual_snps = 0
-        num_snps = np.random.poisson(0.1)
-        while actual_snps < num_snps:
-            idx = random.randint(0, len(mutated_sequence) - 1)
+        if indel_records:
+            pos = np.array(adjust_pos_coordinates(pos.tolist(), indel_records))
 
-            bases = ['A', 'T', 'C', 'G']
-            bases.remove(mutated_sequence[idx])
-            mutated_base = random.choice(bases)
-            actual_snps += 1
-            mutation_records.append((generation, "SNP", idx + 1, mutated_sequence[idx], mutated_base, "-"))
-            mutated_sequence[idx] = mutated_base
-
-        actual_indels = 0
-        num_indels = np.random.poisson(0.5)
-        while actual_indels < num_indels:
-            idx = random.randint(0, len(mutated_sequence) - 1)
-            indel_type = random.choice(["INS", "DEL"])
-
-            copy_num = np.random.poisson(7.6)
-            idx_unit_start, idx_unit_end = find_unit_boundaries(adjusted_pos, idx)
-
-            if idx_unit_start is None or idx_unit_end is None:
-                continue
-            idx_unit_seq = get_sequence(mutated_sequence, idx_unit_start, idx_unit_end)
-
-            idx_pairwise_unit_start, idx_pairwise_unit_end = find_nth_unit_after(adjusted_pos, idx, copy_num)
-
-            if idx_pairwise_unit_start is None or idx_pairwise_unit_end is None:
-                continue
-            idx_pairwise_unit_seq = get_sequence(mutated_sequence, idx_pairwise_unit_start, idx_pairwise_unit_end)
-
-            if len(idx_unit_seq) == 0 or len(idx_pairwise_unit_seq) == 0:
-                continue
-
-            try:
-                align = pairwise_alignment(idx_unit_seq, idx_pairwise_unit_seq)
-            except IndexError:
-                continue
-
-            idx_pairwise = find_pairwise_points(align, idx - idx_unit_start)
-
-            if idx_pairwise == -1:  # Skip if pairwise point was not found
-                continue
-
-            idx_pairwise_abs = int(idx_pairwise_unit_start) + idx_pairwise
-
-            if indel_type == "INS":
-                insertion_sequence = "".join(mutated_sequence[idx:idx_pairwise_abs])
-                mutation_records.append((generation, indel_type, idx, mutated_sequence[idx - 1], "".join(mutated_sequence[idx - 1:idx_pairwise_abs]), copy_num))
-                mutated_sequence[idx:idx] = list(insertion_sequence)
-                actual_indels += 1
-            elif indel_type == "DEL":
-                mutation_records.append((generation, indel_type, idx, "".join(mutated_sequence[idx - 1:idx_pairwise_abs]), "".join(mutated_sequence[idx - 1]), copy_num))
-                del mutated_sequence[idx:idx_pairwise_abs]
-                actual_indels += 1
-
-            # Collect indel record for batch processing
-            generation_indel_records.append((generation, indel_type, idx, idx_pairwise_abs))
-
-        actual_conversions = 0
-        num_conversions = np.random.poisson(1)
-        while actual_conversions < num_conversions:
-            start = random.randint(0, len(mutated_sequence) - 1)
-            conversion_size = np.random.poisson(20)
-            end = start + conversion_size
-
-            start_unit_start, start_unit_end = find_unit_boundaries(adjusted_pos, start)
-            end_unit_start, end_unit_end = find_unit_boundaries(adjusted_pos, end)
-
-            if (start_unit_start is None or start_unit_end is None or
-                end_unit_start is None or end_unit_end is None):
-                continue
-            start_unit_seq = get_sequence(mutated_sequence, start_unit_start, start_unit_end)
-            end_unit_seq = get_sequence(mutated_sequence, end_unit_start, end_unit_end)
-
-            start_pairwise_unit_start, start_pairwise_unit_end = find_nth_unit_after(adjusted_pos, start, 1)
-            end_pairwise_unit_start, end_pairwise_unit_end = find_nth_unit_after(adjusted_pos, end, 1)
-
-            if (start_pairwise_unit_start is None or start_pairwise_unit_end is None or
-                end_pairwise_unit_start is None or end_pairwise_unit_end is None):
-                continue
-            start_pairwise_unit_seq = get_sequence(mutated_sequence, start_pairwise_unit_start, start_pairwise_unit_end)
-            end_pairwise_unit_seq = get_sequence(mutated_sequence, end_pairwise_unit_start, end_pairwise_unit_end)
-
-            if len(start_unit_seq) == 0 or len(end_unit_seq) == 0 or len(start_pairwise_unit_seq) == 0 or len(end_pairwise_unit_seq) == 0:
-                continue
-
-            try:
-                align1 = pairwise_alignment(start_unit_seq, start_pairwise_unit_seq)
-                align2 = pairwise_alignment(end_unit_seq, end_pairwise_unit_seq)
-            except IndexError:
-                continue
-
-            start_pairwise = find_pairwise_points(align1, start - start_unit_start)
-            end_pairwise = find_pairwise_points(align2, end - end_unit_start)
-
-            if start_pairwise == -1 or end_pairwise == -1:  # Skip if pairwise point was not found
-                continue
-
-            start_pairwise_abs = int(start_pairwise_unit_start) + start_pairwise
-            end_pairwise_abs = int(end_pairwise_unit_start) + end_pairwise
-
-            donor_sequence = "".join(mutated_sequence[start:end])
-            receipt_sequence = "".join(mutated_sequence[start_pairwise_abs:end_pairwise_abs])
-            if donor_sequence == receipt_sequence:
-                conversion_out = "Identical"
-            elif len(donor_sequence) == len(receipt_sequence):
-                conversion_out = "SNP"
-            else:
-                conversion_out = "INDEL"
-            mutation_records.append((generation, "Conversion", start_pairwise_abs, receipt_sequence, donor_sequence, conversion_out))
-
-            actual_conversions += 1
-
-            # Update adjusted_pos
-            conversion_indel_records = []
-            if conversion_out == "INDEL":
-                if start_unit_start == end_unit_start and start_pairwise_unit_start == end_pairwise_unit_start:
-                    if len(donor_sequence) > len(receipt_sequence): #INS
-                        conversion_indel_records = [(generation, "INS", start_pairwise_abs, start_pairwise_abs + len(donor_sequence) - len(receipt_sequence))]
-                    else: #DEL
-                        conversion_indel_records = [(generation, "DEL", end_pairwise_abs + len(receipt_sequence) - len(donor_sequence), end_pairwise_abs)]
-                else:
-                    if (start_unit_end - start) > (start_pairwise_unit_end - start_pairwise_abs): #INS
-                        conversion_indel_records = [(generation, "INS", start_pairwise_abs, start_pairwise_abs + (start_unit_end - start) - (start_pairwise_unit_end - start_pairwise_abs))]
-                    elif (start_unit_end - start) < (start_pairwise_unit_end - start_pairwise_abs): #DEL
-                        conversion_indel_records = [(generation, "DEL", start_pairwise_abs + (start_unit_end - start) - (start_pairwise_unit_end - start_pairwise_abs), start_pairwise_abs)]
-                    if (end - end_unit_start) > (end_pairwise_abs - end_pairwise_unit_start): #INS
-                        conversion_indel_records = [(generation, "INS", end_pairwise_abs, end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start))]
-                    elif (end - end_unit_start) < (end_pairwise_abs - end_pairwise_unit_start): #DEL
-                        conversion_indel_records = [(generation, "DEL", end_pairwise_abs + (end - end_unit_start) - (end_pairwise_abs - end_pairwise_unit_start), end_pairwise_abs)]
-
-                # Collect conversion indel records for batch processing
-                generation_indel_records.extend(conversion_indel_records)
-
-        # Apply all position adjustments for this generation in one batch
-        if generation_indel_records:
-            adjusted_pos = np.array(adjust_pos_coordinates(adjusted_pos.tolist(), generation_indel_records))
-
-    # Sort positions once at the end
-    adjusted_pos = np.sort(adjusted_pos)
-    return "".join(mutated_sequence), mutation_records, adjusted_pos.tolist()
+    return "".join(seq), records, np.sort(pos).tolist()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Simulate mutations in DNA sequences')
