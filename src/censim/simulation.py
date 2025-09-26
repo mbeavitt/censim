@@ -20,44 +20,56 @@ def get_aligner():
         _global_aligner.extend_gap_score = -1
     return _global_aligner
 
-def find_unit_boundaries(unit_positions, idx):
-    """Fast unit boundary lookup using binary search."""
+def find_unit_boundaries(unit_positions, idx, fast_mode=True):
+    """Fast unit boundary lookup using simple modulo arithmetic = O(1).
+    If repeat size is not 178bp, fallback to slower binary search = O(log n)"""
     if len(unit_positions) == 0:
         return None, None
 
     # Find the last unit start <= idx
-    pos = bisect.bisect_right(unit_positions, idx) - 1
-    if pos < 0:
-        return None, None
-
-    unit_start = unit_positions[pos]
-
-    # Find the next unit start > idx
-    if pos + 1 < len(unit_positions):
-        unit_end = unit_positions[pos + 1]
+    if fast_mode:
+        shift = idx % 178
+        unit_start = idx - shift
+        unit_end = idx + (178 - shift)
     else:
-        return unit_start, None
+        pos = bisect.bisect_right(unit_positions, idx) - 1
+        if pos < 0:
+            return None, None
+
+        unit_start = unit_positions[pos]
+
+        # Find the next unit start > idx
+        if pos + 1 < len(unit_positions):
+            unit_end = unit_positions[pos + 1]
+        else:
+            return unit_start, None
 
     return unit_start, unit_end
 
-def find_nth_unit_after(unit_positions, idx, n):
+def find_nth_unit_after(unit_positions, idx, n, fast_mode=True):
     """Find the nth unit after the given index."""
     if len(unit_positions) == 0 or n <= 0:
         return None, None
 
-    # Find first unit start > idx
-    pos = bisect.bisect_right(unit_positions, idx)
+    if fast_mode:
+        shift = idx % 178
+        unit_start = idx - shift + (178 * n)
+        unit_end = idx + (178 - shift) + (178 * n)
 
-    if pos + n - 1 >= len(unit_positions):
-        return None, None
-
-    start_pos = pos + n - 1
-    unit_start = unit_positions[start_pos]
-
-    if start_pos + 1 < len(unit_positions):
-        unit_end = unit_positions[start_pos + 1]
     else:
-        return unit_start, None
+        # Find first unit start > idx
+        pos = bisect.bisect_right(unit_positions, idx)
+
+        if pos + n - 1 >= len(unit_positions):
+            return None, None
+
+        start_pos = pos + n - 1
+        unit_start = unit_positions[start_pos]
+
+        if start_pos + 1 < len(unit_positions):
+            unit_end = unit_positions[start_pos + 1]
+        else:
+            return unit_start, None
 
     return unit_start, unit_end
 
@@ -311,7 +323,7 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
             )
             indel_records.extend(conv_indels)
 
-def introduce_mutations(sequence, generation, num_generations, unit_data):
+def introduce_mutations(sequence, generation, num_generations, unit_data, fast_mode=True):
     seq = list(sequence)
     records = []
     pos = np.sort(unit_data["start"].values if isinstance(unit_data, pd.DataFrame) else np.array(unit_data))
