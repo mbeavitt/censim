@@ -186,6 +186,230 @@ def all_vs_all_identity_subsample(repeats, subsample_every=10):
 
     return full_matrix.astype(np.float32)
 
+def box_count(matrix, threshold=0.9):
+    """
+    Calculate fractal dimension using box counting algorithm.
+
+    Args:
+        matrix: binary matrix (or continuous matrix to be thresholded)
+        threshold: threshold for binarization (default: 0.5)
+
+    Returns:
+        fractal_dimension: the estimated fractal dimension
+    """
+    # Binarize the matrix
+    binary_matrix = (matrix > threshold).astype(int)
+
+    # Get matrix dimensions
+    n = binary_matrix.shape[0]
+
+    # Box sizes to test (powers of 2 that divide n evenly, plus some others)
+    max_box_size = n // 2
+    box_sizes = []
+
+    # Generate box sizes: start with powers of 2
+    size = 1
+    while size <= max_box_size:
+        box_sizes.append(size)
+        size *= 2
+
+    # Add intermediate sizes for better fitting
+    for i in range(len(box_sizes) - 1):
+        mid = (box_sizes[i] + box_sizes[i+1]) // 2
+        if mid not in box_sizes and mid > box_sizes[i]:
+            box_sizes.append(mid)
+
+    box_sizes = sorted(box_sizes)
+
+    print(f"Testing box sizes: {box_sizes}")
+
+    counts = []
+    scales = []
+
+    for box_size in box_sizes:
+        count = 0
+        # Iterate over boxes
+        for i in range(0, n, box_size):
+            for j in range(0, n, box_size):
+                # Extract box
+                box = binary_matrix[i:min(i+box_size, n), j:min(j+box_size, n)]
+                # Count if box contains any 1s
+                if np.any(box):
+                    count += 1
+
+        counts.append(count)
+        scales.append(1.0 / box_size)
+        print(f"Box size {box_size}: {count} boxes")
+
+    # Fit log-log plot
+    log_scales = np.log(scales)
+    log_counts = np.log(counts)
+
+    # Linear regression
+    coeffs = np.polyfit(log_scales, log_counts, 1)
+    fractal_dimension = coeffs[0]
+
+    print(f"\nFractal dimension: {fractal_dimension:.4f}")
+
+    # Plot the box counting result
+    plt.figure(figsize=(10, 6))
+    plt.subplot(1, 2, 1)
+    plt.loglog(scales, counts, 'bo-', label='Data')
+    fit_counts = np.exp(coeffs[1]) * np.array(scales) ** coeffs[0]
+    plt.loglog(scales, fit_counts, 'r--', label=f'Fit: D={fractal_dimension:.4f}')
+    plt.xlabel('Scale (1/box size)')
+    plt.ylabel('Number of boxes')
+    plt.title('Box Counting Method')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(binary_matrix, cmap='binary', interpolation='nearest')
+    plt.title(f'Binary Matrix (threshold ≥ {threshold})')
+
+    plt.tight_layout()
+    plt.savefig('./output/fractal_dimension.png', dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Fractal dimension plot saved as ./output/fractal_dimension.png")
+
+    return fractal_dimension
+
+def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
+    """
+    Calculate fractal dimension using a sliding window across the matrix.
+
+    Args:
+        matrix: binary identity matrix
+        window_size: size of the sliding window (default: 100)
+        threshold: threshold value for plot labeling
+
+    Returns:
+        tuple of (positions, fractal_dimensions) for each window position
+    """
+    n = matrix.shape[0]
+
+    print(f"\nSliding window analysis:")
+    print(f"Matrix size: {n}")
+    print(f"Window size: {window_size}")
+
+    if window_size >= n:
+        print("Window size >= matrix size, skipping sliding window analysis")
+        return [], []
+
+    fractal_dimensions = []
+    positions = []
+
+    # Slide the window one repeat at a time
+    step = 1
+    for start in range(0, n - window_size + 1, step):
+        end = start + window_size
+
+        # Extract window
+        window = matrix[start:end, start:end]
+
+        # Calculate fractal dimension for this window
+        # Use simpler box counting without plotting
+        binary_matrix = window
+        box_sizes = []
+        size = 1
+        max_box_size = window_size // 2
+        while size <= max_box_size:
+            box_sizes.append(size)
+            size *= 2
+
+        counts = []
+        scales = []
+
+        for box_size in box_sizes:
+            count = 0
+            for i in range(0, window_size, box_size):
+                for j in range(0, window_size, box_size):
+                    box = binary_matrix[i:min(i+box_size, window_size), j:min(j+box_size, window_size)]
+                    if np.any(box):
+                        count += 1
+            counts.append(count)
+            scales.append(1.0 / box_size)
+
+        if len(scales) > 1:
+            log_scales = np.log(scales)
+            log_counts = np.log(counts)
+            coeffs = np.polyfit(log_scales, log_counts, 1)
+            fractal_dim = coeffs[0]
+        else:
+            fractal_dim = np.nan
+
+        fractal_dimensions.append(fractal_dim)
+        positions.append(start + window_size // 2)  # Center position
+
+        if (start // step) % 10 == 0:
+            print(f"Progress: window at position {start}/{n - window_size}")
+
+    print(f"Computed {len(fractal_dimensions)} windows")
+
+    # Plot results - basic plots
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(positions, fractal_dimensions, 'b-', linewidth=1.5)
+    plt.xlabel('Position (repeat index)')
+    plt.ylabel('Fractal Dimension')
+    plt.title(f'Sliding Window Fractal Dimension\n(window={window_size}, threshold≥{threshold})')
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(1, 2, 2)
+    plt.hist(fractal_dimensions, bins=30, edgecolor='black', alpha=0.7)
+    plt.xlabel('Fractal Dimension')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Fractal Dimensions')
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig('./output/sliding_window_fractal.png', dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Sliding window plot saved as ./output/sliding_window_fractal.png")
+
+    print(f"\nFractal dimension statistics:")
+    print(f"  Mean: {np.mean(fractal_dimensions):.4f}")
+    print(f"  Std:  {np.std(fractal_dimensions):.4f}")
+    print(f"  Min:  {np.min(fractal_dimensions):.4f}")
+    print(f"  Max:  {np.max(fractal_dimensions):.4f}")
+
+    # Create combined plot with rotated matrix and sliding window
+    from scipy.ndimage import rotate
+
+    # Prepare upper triangle and rotate
+    masked_matrix = np.copy(matrix).astype(float)
+    for i in range(n):
+        for j in range(i):
+            masked_matrix[i, j] = np.nan
+
+    rotated = rotate(masked_matrix, 45, reshape=True, order=0, cval=np.nan)
+
+    # Create figure with custom layout
+    fig = plt.figure(figsize=(14, 8))
+
+    # Top: rotated matrix
+    ax1 = plt.subplot(2, 1, 1)
+    plt.imshow(rotated, cmap='binary', interpolation='nearest', aspect='auto')
+    plt.title(f'Binary Matrix (45° rotation, threshold ≥ {threshold})')
+    plt.axis('off')
+
+    # Bottom: sliding window aligned
+    ax2 = plt.subplot(2, 1, 2)
+    plt.plot(positions, fractal_dimensions, 'b-', linewidth=1.5)
+    plt.xlabel('Position (repeat index)')
+    plt.ylabel('Fractal Dimension')
+    plt.title(f'Sliding Window Fractal Dimension (window={window_size})')
+    plt.grid(True, alpha=0.3)
+    plt.xlim(0, n)
+
+    plt.tight_layout()
+    plt.savefig('./output/combined_matrix_fractal.png', dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Combined plot saved as ./output/combined_matrix_fractal.png")
+
+    return positions, fractal_dimensions
+
 def plot_identity_heatmap(matrix, title="All vs All Sequence Identity", filename="identity_heatmap.png"):
     """
     Create a heatmap visualization of the identity matrix.
@@ -231,19 +455,31 @@ if __name__ == "__main__":
     # Compute identity matrix with adaptive subsampling
     print("\n=== Computing identity matrix ===")
     start = time.time()
-    identity_matrix = all_vs_all_identity_scipy(repeats, max_exact_size=1000)
+    identity_matrix = all_vs_all_identity_scipy(repeats, scale_factor=30, max_exact_size=1000)
     elapsed = time.time() - start
     print(f"Computation took: {elapsed:.2f} seconds")
 
-    print("\nIdentity Matrix shape:", identity_matrix.shape)
+    print("\nNumber of repeats:", len(repeats))
+    print("Identity Matrix shape:", identity_matrix.shape)
     print(f"Mean identity: {identity_matrix.mean():.3f}")
     matrix_size = identity_matrix.shape[0]
     print(f"Min identity (off-diagonal): {identity_matrix[~np.eye(matrix_size, dtype=bool)].min():.3f}")
     print(f"Max identity (off-diagonal): {identity_matrix[~np.eye(matrix_size, dtype=bool)].max():.3f}")
 
+    # Convert to binary: threshold at identity_threshold
+    print(f"\nBinarizing matrix (threshold >= {identity_threshold})...")
+    identity_matrix = (identity_matrix >= identity_threshold).astype(float)
+    print(f"Binary matrix - fraction of 1s: {identity_matrix.mean():.4f}")
+
+    print("\n=== Computing fractal dimension ===")
+    box_count(identity_matrix, threshold=identity_threshold)
+
+    print("\n=== Computing sliding window fractal dimension ===")
+    sliding_window_fractal_dimension(identity_matrix, window_size=100, threshold=identity_threshold)
+
     # Save heatmap
-    print("\nSaving heatmap...")
-    plot_identity_heatmap(identity_matrix,
-                         title=f"All vs All Identity ({n_repeats} repeats, {repeat_len}bp)",
-                         filename="./output/identity_heatmap.png")
-    print("Heatmap saved as ./output/identity_heatmap.png")
+#    print("\nSaving heatmap...")
+#    plot_identity_heatmap(identity_matrix,
+#                         title=f"All vs All Identity ({n_repeats} repeats, {repeat_len}bp)",
+#                         filename="./output/identity_heatmap.png")
+#    print("Heatmap saved as ./output/identity_heatmap.png")
