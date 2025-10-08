@@ -296,16 +296,22 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
         print("Window size >= matrix size, skipping sliding window analysis")
         return [], []
 
+    # Pad the matrix with zeros to allow windows at the edges
+    pad_size = window_size // 2
+    padded_matrix = np.pad(matrix, pad_size, mode='constant', constant_values=0)
+    print(f"Padded matrix size: {padded_matrix.shape[0]} (added {pad_size} on each side)")
+
     fractal_dimensions = []
     positions = []
 
     # Slide the window one repeat at a time
     step = 1
-    for start in range(0, n - window_size + 1, step):
+    # Now we can slide from 0 to n (inclusive), using the padded matrix
+    for start in range(0, n, step):
         end = start + window_size
 
-        # Extract window
-        window = matrix[start:end, start:end]
+        # Extract window from padded matrix
+        window = padded_matrix[start:end, start:end]
 
         # Calculate fractal dimension for this window
         # Use simpler box counting without plotting
@@ -339,10 +345,10 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
             fractal_dim = np.nan
 
         fractal_dimensions.append(fractal_dim)
-        positions.append(start + window_size // 2)  # Center position
+        positions.append(start)  # Now we can use the actual position
 
         if (start // step) % 10 == 0:
-            print(f"Progress: window at position {start}/{n - window_size}")
+            print(f"Progress: window at position {start}/{n}")
 
     print(f"Computed {len(fractal_dimensions)} windows")
 
@@ -388,9 +394,12 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
     # Create figure with custom layout
     fig = plt.figure(figsize=(14, 8))
 
-    # Top: rotated matrix
+    # Top: rotated matrix with adjusted extent to shift down
     ax1 = plt.subplot(2, 1, 1)
-    plt.imshow(rotated, cmap='binary', interpolation='nearest', aspect='auto')
+    im = plt.imshow(rotated, cmap='binary', interpolation='nearest', aspect='auto')
+    # Shift the image down by adjusting the y limits
+    ylim = ax1.get_ylim()
+    ax1.set_ylim(ylim[0] * 0.5, ylim[1])
     plt.title(f'Binary Matrix (45° rotation, threshold ≥ {threshold})')
     plt.axis('off')
 
