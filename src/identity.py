@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
+import sys
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.spatial.distance import pdist, squareform
@@ -194,7 +195,6 @@ def plot_identity_heatmap(matrix, title="All vs All Sequence Identity", filename
         title: plot title
         filename: output filename
     """
-    print(matrix.shape)
     plt.figure(figsize=(10, 8))
     sns.heatmap(matrix,
                 cmap='RdYlBu_r',
@@ -211,8 +211,11 @@ def plot_identity_heatmap(matrix, title="All vs All Sequence Identity", filename
     plt.close()
 
 if __name__ == "__main__":
+    # Configuration
+    identity_threshold = float(sys.argv[1])
+
     # Load real data
-    with open("./data/sim_309/2191000generation.out.fa", "r") as file:
+    with open("./data/2191000generation.out.fa", "r") as file:
         contents = file.read().strip()
 
     repeat_len = 178
