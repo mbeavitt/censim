@@ -45,11 +45,12 @@ def run_simulation(test_setup, generations, seed, suffix=""):
     fasta_out = params['test_dir'] / f"{base_name}.fa"
     record_out = params['test_dir'] / f"{base_name}.record.txt"
     pos_out = params['test_dir'] / f"{base_name}.pos"
+    cenh3_out = params['test_dir'] / f"{base_name}.cenh3.txt"
 
     cmd = [
         "python", "-m", "censim.simulation",
         params['input_seq'], str(generations), params['input_pos'],
-        str(fasta_out), str(record_out), str(pos_out),
+        str(fasta_out), str(record_out), str(pos_out), str(cenh3_out),
         "--seed", str(seed)
     ]
 
@@ -180,6 +181,7 @@ def test_small_simulation_performance(test_setup):
         str(test_setup['test_dir'] / "perf_test.fa"),
         str(test_setup['test_dir'] / "perf_test.record.txt"),
         str(test_setup['test_dir'] / "perf_test.pos"),
+        str(test_setup['test_dir'] / "perf_test.cenh3.txt"),
         "--seed", "42"
     ]
 
@@ -200,6 +202,7 @@ def test_medium_simulation_performance(test_setup):
         str(test_setup['test_dir'] / "perf_test_100.fa"),
         str(test_setup['test_dir'] / "perf_test_100.record.txt"),
         str(test_setup['test_dir'] / "perf_test_100.pos"),
+        str(test_setup['test_dir'] / "perf_test_100.cenh3.txt"),
         "--seed", "42"
     ]
 
@@ -220,6 +223,7 @@ def test_large_simulation_performance(test_setup):
         str(test_setup['test_dir'] / "perf_test_1000.fa"),
         str(test_setup['test_dir'] / "perf_test_1000.record.txt"),
         str(test_setup['test_dir'] / "perf_test_1000.pos"),
+        str(test_setup['test_dir'] / "perf_test_1000.cenh3.txt"),
         "--seed", "42"
     ]
 
@@ -240,6 +244,7 @@ def test_extra_large_simulation_performance(test_setup):
         str(test_setup['test_dir'] / "perf_test_10000.fa"),
         str(test_setup['test_dir'] / "perf_test_10000.record.txt"),
         str(test_setup['test_dir'] / "perf_test_10000.pos"),
+        str(test_setup['test_dir'] / "perf_test_10000.cenh3.txt"),
         "--seed", "42"
     ]
 
@@ -276,7 +281,8 @@ def test_seed_none_is_random(test_setup):
         test_setup['input_seq'], str(generations), test_setup['input_pos'],
         str(test_setup['test_dir'] / "random1.fa"),
         str(test_setup['test_dir'] / "random1.record.txt"),
-        str(test_setup['test_dir'] / "random1.pos")
+        str(test_setup['test_dir'] / "random1.pos"),
+        str(test_setup['test_dir'] / "random1.cenh3.txt")
     ]
 
     cmd2 = [
@@ -284,7 +290,8 @@ def test_seed_none_is_random(test_setup):
         test_setup['input_seq'], str(generations), test_setup['input_pos'],
         str(test_setup['test_dir'] / "random2.fa"),
         str(test_setup['test_dir'] / "random2.record.txt"),
-        str(test_setup['test_dir'] / "random2.pos")
+        str(test_setup['test_dir'] / "random2.pos"),
+        str(test_setup['test_dir'] / "random2.cenh3.txt")
     ]
 
     result1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=60)

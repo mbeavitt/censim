@@ -14,6 +14,7 @@ def main():
     os.makedirs("output/fasta", exist_ok=True)
     os.makedirs("output/records", exist_ok=True)
     os.makedirs("output/generation_unit_pos", exist_ok=True)
+    os.makedirs("output/cenh3", exist_ok=True)
 
     # Initial parameters
     input_sequence_file = "./data/15000copy_cen178.seq"
@@ -28,7 +29,7 @@ def main():
         print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
-        mutated_sequence, mutation_records, adjusted_pos = introduce_mutations(
+        mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy = introduce_mutations(
             current_sequence, generation - 1000, 1000, current_unit_data
         )
 
@@ -36,6 +37,7 @@ def main():
         fasta_output = f"./output/fasta/{generation}generation.out.fa"
         record_output = f"./output/records/{generation}generation.record.txt"
         pos_output = f"./output/generation_unit_pos/{generation}generation.unit.pos"
+        cenh3_output = f"./output/cenh3/{generation}generation.cenh3.txt"
 
         # Write FASTA file with header
         with open(fasta_output, "w") as f:
@@ -52,6 +54,14 @@ def main():
         with open(pos_output, "w") as f:
             for pos in sorted(adjusted_pos):
                 f.write(f"centro_{generation}gen\t{pos}\n")
+
+        # Write CENH3 occupancy
+        with open(cenh3_output, "w") as f:
+            for idx, occupied in enumerate(cenh3_occupancy):
+                if occupied:
+                    f.write(f"{idx}\t1\n")
+                else:
+                    f.write(f"{idx}\t0\n")
 
         print("done")
 

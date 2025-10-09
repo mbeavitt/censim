@@ -262,6 +262,10 @@ def get_conversion_indel_records(generation, start, end, start_unit_start, start
 
     return records
 
+def update_cenh3(cenh3_occupancy, indel_records):
+    """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
+    return cenh3_occupancy
+
 def apply_conversion_mutations(seq, generation, pos, records, indel_records):
     """Apply conversion mutations to sequence."""
     count = 0
@@ -323,10 +327,26 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
             )
             indel_records.extend(conv_indels)
 
+def initialize_cenh3_occupancy(num_units):
+    """Initialize CENH3 occupancy with 1000 nucleosomes normally distributed around the middle."""
+    cenh3_occupancy = np.zeros(num_units, dtype=bool)
+    middle = num_units // 2
+    std_dev = 10  # Low variance - most CENH3 clustered tightly around the center
+
+    indices = np.random.normal(middle, std_dev, 1000).astype(int)
+    indices = np.clip(indices, 0, num_units - 1)
+    cenh3_occupancy[indices] = True
+
+    return cenh3_occupancy
+
 def introduce_mutations(sequence, generation, num_generations, unit_data, fast_mode=True):
     seq = list(sequence)
     records = []
     pos = np.sort(unit_data["start"].values if isinstance(unit_data, pd.DataFrame) else np.array(unit_data))
+
+    # Initialize CENH3 occupancy
+    num_units = len(pos)
+    cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
     for _ in range(num_generations):
         generation += 1
@@ -338,8 +358,9 @@ def introduce_mutations(sequence, generation, num_generations, unit_data, fast_m
 
         if indel_records:
             pos = np.array(adjust_pos_coordinates(pos.tolist(), indel_records))
+            cenh3_occupancy = update_cenh3(cenh3_occupancy, indel_records)
 
-    return "".join(seq), records, np.sort(pos).tolist()
+    return "".join(seq), records, np.sort(pos).tolist(), cenh3_occupancy
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Simulate mutations in DNA sequences')
@@ -349,6 +370,7 @@ if __name__ == "__main__":
     parser.add_argument('output_file', help='Output FASTA file')
     parser.add_argument('mutation_record', help='Mutation record output file')
     parser.add_argument('adjusted_pos_output', help='Adjusted positions output file')
+    parser.add_argument('cenh3_output', help='CENH3 occupancy output file')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode with breakpoint')
     parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
 
@@ -371,13 +393,14 @@ if __name__ == "__main__":
     output_file = args.output_file
     record_output = args.mutation_record
     adjusted_pos_output = args.adjusted_pos_output
+    cenh3_output = args.cenh3_output
 
     original_sequence = read_sequence(input_file)
 
     # Read the unit_data file
     unit_data = read_pos_file(unit_data_file)
 
-    mutated_sequence, mutation_records, adjusted_pos = introduce_mutations(original_sequence, generation, num_generations, unit_data)
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy = introduce_mutations(original_sequence, generation, num_generations, unit_data)
 
     with open(output_file, "w") as seq_f:
         seq_f.write(mutated_sequence + '\n')
@@ -391,7 +414,15 @@ if __name__ == "__main__":
         for pos in sorted(adjusted_pos): # Ensure posiitons are sorted before writing to the file
             adjusted_f.write(f"centro_{generation}gen\t{pos}\n")
 
+    with open(cenh3_output, "w") as cenh3_f:
+        for idx, occupied in enumerate(cenh3_occupancy):
+            if occupied:
+                cenh3_f.write(f"{idx}\t1\n")
+            else:
+                cenh3_f.write(f"{idx}\t0\n")
+
     print("Mutated sequence written to", output_file)
     print("Mutation records written to", record_output)
     print("Adjusted positions written to", adjusted_pos_output)
+    print("CENH3 occupancy written to", cenh3_output)
 
