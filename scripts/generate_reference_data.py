@@ -33,13 +33,14 @@ def generate_reference_files():
         fasta_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.fa"
         record_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
         pos_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.pos"
+        cenh3_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.cenh3.txt"
 
         # Run simulation
         cmd = [
             "python", "-m", "censim.simulation",
             "./data/15000copy_cen178.seq", str(generations),
             "./data/15000copy_cen178.178bp.bed.pos",
-            str(fasta_ref), str(record_ref), str(pos_ref),
+            str(fasta_ref), str(record_ref), str(pos_ref), str(cenh3_ref),
             "--seed", str(seed)
         ]
 
