@@ -249,14 +249,21 @@ def box_count(matrix, threshold=0.9):
     coeffs = np.polyfit(log_scales, log_counts, 1)
     fractal_dimension = coeffs[0]
 
+    # Calculate R²
+    fitted_log_counts = coeffs[0] * log_scales + coeffs[1]
+    ss_res = np.sum((log_counts - fitted_log_counts) ** 2)
+    ss_tot = np.sum((log_counts - np.mean(log_counts)) ** 2)
+    r_squared = 1 - (ss_res / ss_tot)
+
     print(f"\nFractal dimension: {fractal_dimension:.4f}")
+    print(f"R²: {r_squared:.4f}")
 
     # Plot the box counting result
     plt.figure(figsize=(10, 6))
     plt.subplot(1, 2, 1)
     plt.loglog(scales, counts, 'bo-', label='Data')
     fit_counts = np.exp(coeffs[1]) * np.array(scales) ** coeffs[0]
-    plt.loglog(scales, fit_counts, 'r--', label=f'Fit: D={fractal_dimension:.4f}')
+    plt.loglog(scales, fit_counts, 'r--', label=f'Fit: D={fractal_dimension:.4f}, R²={r_squared:.4f}')
     plt.xlabel('Scale (1/box size)')
     plt.ylabel('Number of boxes')
     plt.title('Box Counting Method')
@@ -302,6 +309,7 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
     print(f"Padded matrix size: {padded_matrix.shape[0]} (added {pad_size} on each side)")
 
     fractal_dimensions = []
+    r_squared_values = []
     positions = []
 
     # Slide the window one repeat at a time
@@ -341,10 +349,18 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
             log_counts = np.log(counts)
             coeffs = np.polyfit(log_scales, log_counts, 1)
             fractal_dim = coeffs[0]
+
+            # Calculate R² for this window
+            fitted_log_counts = coeffs[0] * log_scales + coeffs[1]
+            ss_res = np.sum((log_counts - fitted_log_counts) ** 2)
+            ss_tot = np.sum((log_counts - np.mean(log_counts)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot)
         else:
             fractal_dim = np.nan
+            r_squared = np.nan
 
         fractal_dimensions.append(fractal_dim)
+        r_squared_values.append(r_squared)
         positions.append(start)  # Now we can use the actual position
 
         if (start // step) % 10 == 0:
@@ -353,20 +369,34 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
     print(f"Computed {len(fractal_dimensions)} windows")
 
     # Plot results - basic plots
-    plt.figure(figsize=(12, 5))
+    plt.figure(figsize=(12, 10))
 
-    plt.subplot(1, 2, 1)
+    plt.subplot(2, 2, 1)
     plt.plot(positions, fractal_dimensions, 'b-', linewidth=1.5)
     plt.xlabel('Position (repeat index)')
     plt.ylabel('Fractal Dimension')
     plt.title(f'Sliding Window Fractal Dimension\n(window={window_size}, threshold≥{threshold})')
     plt.grid(True, alpha=0.3)
 
-    plt.subplot(1, 2, 2)
+    plt.subplot(2, 2, 2)
     plt.hist(fractal_dimensions, bins=30, edgecolor='black', alpha=0.7)
     plt.xlabel('Fractal Dimension')
     plt.ylabel('Frequency')
     plt.title('Distribution of Fractal Dimensions')
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(2, 2, 3)
+    plt.plot(positions, r_squared_values, 'r-', linewidth=1.5)
+    plt.xlabel('Position (repeat index)')
+    plt.ylabel('R²')
+    plt.title('Sliding Window R² Values')
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(2, 2, 4)
+    plt.hist(r_squared_values, bins=30, edgecolor='black', alpha=0.7, color='coral')
+    plt.xlabel('R²')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of R² Values')
     plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -379,6 +409,12 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
     print(f"  Std:  {np.std(fractal_dimensions):.4f}")
     print(f"  Min:  {np.min(fractal_dimensions):.4f}")
     print(f"  Max:  {np.max(fractal_dimensions):.4f}")
+
+    print(f"\nR² statistics:")
+    print(f"  Mean: {np.mean(r_squared_values):.4f}")
+    print(f"  Std:  {np.std(r_squared_values):.4f}")
+    print(f"  Min:  {np.min(r_squared_values):.4f}")
+    print(f"  Max:  {np.max(r_squared_values):.4f}")
 
     # Create combined plot with rotated matrix and sliding window
     from scipy.ndimage import rotate
@@ -417,7 +453,7 @@ def sliding_window_fractal_dimension(matrix, window_size=100, threshold=0.9):
     plt.close()
     print(f"Combined plot saved as ./output/combined_matrix_fractal.png")
 
-    return positions, fractal_dimensions
+    return positions, fractal_dimensions, r_squared_values
 
 def plot_identity_heatmap(matrix, title="All vs All Sequence Identity", filename="identity_heatmap.png"):
     """
