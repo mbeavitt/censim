@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -10,22 +11,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from censim.simulation import read_sequence, read_pos_file, introduce_mutations
 
 def main():
+    parser = argparse.ArgumentParser(description="Run full centromere simulation")
+    parser.add_argument("--sequence-file", "-s", required=True,
+                        help="Input sequence file (.seq)")
+    parser.add_argument("--pos-file", "-p", required=True,
+                        help="Input position file (.pos)")
+    parser.add_argument("--output-dir", "-o", default="./output",
+                        help="Output directory (default: ./output)")
+
+    args = parser.parse_args()
+
     # Create output directories
-    os.makedirs("output/fasta", exist_ok=True)
-    os.makedirs("output/records", exist_ok=True)
-    os.makedirs("output/generation_unit_pos", exist_ok=True)
-    os.makedirs("output/cenh3", exist_ok=True)
+    output_base = Path(args.output_dir)
+    os.makedirs(output_base / "fasta", exist_ok=True)
+    os.makedirs(output_base / "records", exist_ok=True)
+    os.makedirs(output_base / "generation_unit_pos", exist_ok=True)
+    os.makedirs(output_base / "cenh3", exist_ok=True)
 
     # Initial parameters
-    input_sequence_file = "./data/15000copy_cen178.seq"
-    initial_pos_file = "./data/15000copy_cen178.178bp.bed.pos"
+    input_sequence_file = args.sequence_file
+    initial_pos_file = args.pos_file
 
     # Read initial sequence and unit positions
     current_sequence = read_sequence(input_sequence_file)
     current_unit_data = read_pos_file(initial_pos_file)
 
     # Run simulation for 6 million generations in 1000-generation chunks
-    for generation in range(1000, 6000001, 1000):
+    for generation in range(1000, 1001, 1000):
         print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
@@ -34,10 +46,10 @@ def main():
         )
 
         # Write output files
-        fasta_output = f"./output/fasta/{generation}generation.out.fa"
-        record_output = f"./output/records/{generation}generation.record.txt"
-        pos_output = f"./output/generation_unit_pos/{generation}generation.unit.pos"
-        cenh3_output = f"./output/cenh3/{generation}generation.cenh3.txt"
+        fasta_output = output_base / "fasta" / f"{generation}generation.out.fa"
+        record_output = output_base / "records" / f"{generation}generation.record.txt"
+        pos_output = output_base / "generation_unit_pos" / f"{generation}generation.unit.pos"
+        cenh3_output = output_base / "cenh3" / f"{generation}generation.cenh3.txt"
 
         # Write FASTA file with header
         with open(fasta_output, "w") as f:
