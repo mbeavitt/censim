@@ -37,7 +37,7 @@ def main():
     current_unit_data = read_pos_file(initial_pos_file)
 
     # Run simulation for 6 million generations in 1000-generation chunks
-    for generation in range(1000, 1001, 1000):
+    for generation in range(1000, 6000001, 1000):
         print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
