@@ -2,8 +2,11 @@ Bootstrap: docker
 From: mambaorg/micromamba:2.3.2
 
 %files
-    # Copy your project files into the container
-    replicated-assemblies-centromere-study /opt/censim
+    # Copy only essential files for running full_sim.py
+    pyproject.toml /opt/censim/pyproject.toml
+    requirements.yaml /opt/censim/requirements.yaml
+    scripts/full_sim.py /opt/censim/scripts/full_sim.py
+    src/ /opt/censim/src/
 
 %post
     # Use /bin/bash explicitly for the post script
@@ -15,7 +18,7 @@ From: mambaorg/micromamba:2.3.2
 
     # Create environment from requirements.yaml using micromamba directly
     cd /opt/censim
-    /bin/micromamba create -f requirements.yaml -y -p /opt/conda/envs/censim
+    /bin/micromamba create -f requirements.yaml -q -y -p /opt/conda/envs/censim
 
     # Install the censim package using the environment's pip
     /opt/conda/envs/censim/bin/pip install -e .
