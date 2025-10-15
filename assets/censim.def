@@ -1,0 +1,47 @@
+Bootstrap: docker
+From: mambaorg/micromamba:2.3.2
+
+%files
+    # Copy your project files into the container
+    replicated-assemblies-centromere-study /opt/censim
+
+%post
+    # Use /bin/bash explicitly for the post script
+    #!/bin/bash
+
+    # Set up micromamba environment
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/bin:$PATH
+
+    # Create environment from requirements.yaml using micromamba directly
+    cd /opt/censim
+    /bin/micromamba create -f requirements.yaml -y -p /opt/conda/envs/censim
+
+    # Install the censim package using the environment's pip
+    /opt/conda/envs/censim/bin/pip install -e .
+
+    # Clean up to reduce container size
+    /bin/micromamba clean --all -y
+
+%environment
+    # Set up environment variables
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    export PATH=/opt/conda/envs/censim/bin:$PATH
+
+%runscript
+    # Default: activate environment and run whatever command is passed
+    exec python "$@"
+
+%labels
+    Author mab282
+    Version v0.1.0
+    Description Censim environment for centromere simulations
+
+%help
+    This container includes the censim package and all dependencies.
+
+    Usage:
+        singularity exec censim.sif python script.py [args]
+
+    Or run interactively:
+        singularity shell censim.sif
