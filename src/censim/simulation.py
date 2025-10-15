@@ -186,10 +186,18 @@ def apply_snp_mutations(seq, generation, records):
         seq[idx] = new_base
         count += 1
 
-def apply_indel_mutations(seq, generation, pos, records, indel_records):
-    """Apply INDEL mutations to sequence."""
+def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retries=5000):
+    """Apply INDEL mutations to sequence. Returns (collapsed, consecutive_failures).
+
+    Args:
+        max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
+
+    Returns:
+        tuple: (collapsed: bool, consecutive_failures: int)
+    """
     count = 0
     target = np.random.poisson(0.5)
+    consecutive_failures = 0
 
     while count < target:
         idx = random.randint(0, len(seq) - 1)
@@ -198,7 +206,14 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records):
 
         result = get_unit_sequences(seq, pos, idx, copy_num)
         if result is None:
-            continue
+            consecutive_failures += 1
+            print(consecutive_failures)
+            if consecutive_failures >= max_retries:
+                return True, consecutive_failures  # Signal array collapse after max_retries consecutive failures
+            continue  # Retry with a different random position
+
+        # Reset failure counter on success
+        consecutive_failures = 0
 
         unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq = result
 
@@ -223,6 +238,8 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records):
 
         indel_records.append((generation, indel_type, idx, pair_abs))
         count += 1
+
+    return False, consecutive_failures  # No collapse occurred
 
 def get_conversion_type(donor, receipt):
     """Determine conversion type based on sequence comparison."""
@@ -266,8 +283,16 @@ def update_cenh3(cenh3_occupancy, indel_records):
     """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
     return cenh3_occupancy
 
-def apply_conversion_mutations(seq, generation, pos, records, indel_records):
-    """Apply conversion mutations to sequence."""
+def apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures=0, max_retries=5000):
+    """Apply conversion mutations to sequence. Returns (collapsed, consecutive_failures).
+
+    Args:
+        consecutive_failures: Number of consecutive failures from previous mutation stage (default: 0)
+        max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
+
+    Returns:
+        tuple: (collapsed: bool, consecutive_failures: int)
+    """
     count = 0
     target = np.random.poisson(1)
 
@@ -280,12 +305,20 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
         end_unit_start, end_unit_end = find_unit_boundaries(pos, end)
 
         if any(x is None for x in [start_unit_start, start_unit_end, end_unit_start, end_unit_end]):
+            consecutive_failures += 1
+            print(consecutive_failures)
+            if consecutive_failures >= max_retries:
+                return True, consecutive_failures
             continue
 
         start_pair_unit_start, start_pair_unit_end = find_nth_unit_after(pos, start, 1)
         end_pair_unit_start, end_pair_unit_end = find_nth_unit_after(pos, end, 1)
 
         if any(x is None for x in [start_pair_unit_start, start_pair_unit_end, end_pair_unit_start, end_pair_unit_end]):
+            consecutive_failures += 1
+            print(consecutive_failures)
+            if consecutive_failures >= max_retries:
+                return True, consecutive_failures
             continue
 
         start_unit_seq = get_sequence(seq, start_unit_start, start_unit_end)
@@ -294,6 +327,10 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
         end_pair_seq = get_sequence(seq, end_pair_unit_start, end_pair_unit_end)
 
         if any(len(s) == 0 for s in [start_unit_seq, end_unit_seq, start_pair_seq, end_pair_seq]):
+            consecutive_failures += 1
+            print(consecutive_failures)
+            if consecutive_failures >= max_retries:
+                return True, consecutive_failures
             continue
 
         try:
@@ -307,6 +344,9 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
 
         if start_pair == -1 or end_pair == -1:
             continue
+
+        # Reset failure counter on success
+        consecutive_failures = 0
 
         start_pair_abs = int(start_pair_unit_start) + start_pair
         end_pair_abs = int(end_pair_unit_start) + end_pair
@@ -327,19 +367,33 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records):
             )
             indel_records.extend(conv_indels)
 
+    return False, consecutive_failures
+
 def initialize_cenh3_occupancy(num_units):
-    """Initialize CENH3 occupancy with 1000 nucleosomes normally distributed around the middle."""
+    """Initialize CENH3 occupancy with normal distribution, rate 0.4 at the center (mode).
+
+    Overall occupancy rate is approximately 2-3% with peak concentration at center.
+    """
     cenh3_occupancy = np.zeros(num_units, dtype=bool)
     middle = num_units // 2
-    std_dev = 10  # Low variance - most CENH3 clustered tightly around the center
+    std_dev = num_units / 6
 
-    indices = np.random.normal(middle, std_dev, 1000).astype(int)
-    indices = np.clip(indices, 0, num_units - 1)
-    cenh3_occupancy[indices] = True
+    # For each unit, calculate probability based on normal distribution
+    # At center (distance=0), probability = 0.4 (the mode/peak)
+    for i in range(num_units):
+        distance = abs(i - middle)
+        prob = 0.4 * np.exp(-(distance**2) / (2 * std_dev**2))
+        cenh3_occupancy[i] = np.random.random() < prob
 
     return cenh3_occupancy
 
 def introduce_mutations(sequence, generation, num_generations, unit_data, fast_mode=True):
+    """Introduce mutations into sequence over multiple generations.
+
+    Returns:
+        tuple: (mutated_sequence, mutation_records, adjusted_positions, cenh3_occupancy, collapsed)
+            where collapsed is True if the array collapsed to zero, False otherwise
+    """
     seq = list(sequence)
     records = []
     pos = np.sort(unit_data["start"].values if isinstance(unit_data, pd.DataFrame) else np.array(unit_data))
@@ -348,19 +402,30 @@ def introduce_mutations(sequence, generation, num_generations, unit_data, fast_m
     num_units = len(pos)
     cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
+    collapsed = False
     for _ in range(num_generations):
         generation += 1
         indel_records = []
 
         apply_snp_mutations(seq, generation, records)
-        apply_indel_mutations(seq, generation, pos, records, indel_records)
-        apply_conversion_mutations(seq, generation, pos, records, indel_records)
+
+        # Check if array collapsed during INDEL mutations
+        collapsed, consecutive_failures = apply_indel_mutations(seq, generation, pos, records, indel_records)
+        if collapsed:
+            print("Simulation complete: Array collapsed to zero")
+            break
+
+        # Check if array collapsed during conversion mutations, carrying over consecutive_failures
+        collapsed, consecutive_failures = apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures)
+        if collapsed:
+            print("Simulation complete: Array collapsed to zero")
+            break
 
         if indel_records:
             pos = np.array(adjust_pos_coordinates(pos.tolist(), indel_records))
             cenh3_occupancy = update_cenh3(cenh3_occupancy, indel_records)
 
-    return "".join(seq), records, np.sort(pos).tolist(), cenh3_occupancy
+    return "".join(seq), records, np.sort(pos).tolist(), cenh3_occupancy, collapsed
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Simulate mutations in DNA sequences')
@@ -400,7 +465,7 @@ if __name__ == "__main__":
     # Read the unit_data file
     unit_data = read_pos_file(unit_data_file)
 
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy = introduce_mutations(original_sequence, generation, num_generations, unit_data)
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(original_sequence, generation, num_generations, unit_data)
 
     with open(output_file, "w") as seq_f:
         seq_f.write(mutated_sequence + '\n')

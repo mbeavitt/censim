@@ -41,7 +41,7 @@ def main():
         print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
-        mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy = introduce_mutations(
+        mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
             current_sequence, generation - 1000, 1000, current_unit_data
         )
 
@@ -76,6 +76,11 @@ def main():
                     f.write(f"{idx}\t0\n")
 
         print("done")
+
+        # If array collapsed, stop the simulation
+        if collapsed:
+            print(f"\nSimulation ended at generation {generation} due to array collapse")
+            break
 
         # Update current sequence and unit data for next iteration
         current_sequence = mutated_sequence
