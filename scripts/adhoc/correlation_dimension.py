@@ -63,7 +63,6 @@ def local_correlation_sum(D, radius):
     """
     N = D.shape[0]
     # Count neighbors within radius, excluding self (diagonal)
-    breakpoint()
     counts = np.sum((D < radius) & (~np.eye(N, dtype=bool)), axis=1)
     return counts / (N - 1)
 

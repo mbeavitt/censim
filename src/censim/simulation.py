@@ -207,7 +207,6 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
         result = get_unit_sequences(seq, pos, idx, copy_num)
         if result is None:
             consecutive_failures += 1
-            print(consecutive_failures)
             if consecutive_failures >= max_retries:
                 return True, consecutive_failures  # Signal array collapse after max_retries consecutive failures
             continue  # Retry with a different random position
