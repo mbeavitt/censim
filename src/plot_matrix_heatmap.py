@@ -8,6 +8,7 @@ import sys
 import matplotlib.pyplot as plt
 from scipy.ndimage import rotate
 from pathlib import Path
+import re
 
 from identity import all_vs_all_identity_scipy
 from correlation_dimension import (
@@ -17,7 +18,7 @@ from correlation_dimension import (
 
 
 def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
-                            output_file='./output/matrix_with_heatmap.png'):
+                            generation=None, output_file='./output/matrix_with_heatmap.png'):
     """
     Create a combined plot with rotated distance matrix on top and correlation heatmap below.
 
@@ -27,6 +28,7 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
         mean_corr: (n_windows, n_radii) array of mean correlation values
         r_values: array of radii used
         window_size: window size used
+        generation: generation number to display (optional)
         output_file: output filename
     """
     n = D.shape[0]
@@ -54,6 +56,14 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
     ax_matrix.set_title('Distance Matrix (45° rotation)\nDark = high identity, Light = low identity',
                        fontsize=12, fontweight='bold')
     ax_matrix.axis('off')
+
+    # Add generation number in top left corner if provided
+    if generation is not None:
+        ax_matrix.text(0.02, 0.98, f'Generation: {generation}',
+                      transform=ax_matrix.transAxes,
+                      fontsize=10, fontweight='bold',
+                      verticalalignment='top',
+                      bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
 #    # Add colorbar for matrix
 #    cbar1 = plt.colorbar(im1, ax=ax_matrix, orientation='horizontal',
@@ -146,8 +156,13 @@ def main():
     # Extract filename stem from data file for output naming
     data_stem = Path(data_file).stem  # e.g., "2191000generation.out"
     output_file = output_dir / f"{data_stem}_matrix_heatmap.png"
+
+    # Extract generation number from filename
+    generation_match = re.search(r'(\d+)generation', data_stem)
+    generation = int(generation_match.group(1)) if generation_match else None
+
     plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
-                           output_file=str(output_file))
+                           generation=generation, output_file=str(output_file))
 
     print("\n" + "=" * 70)
     print("COMPLETE")
