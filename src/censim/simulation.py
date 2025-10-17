@@ -196,13 +196,13 @@ def apply_snp_mutations(seq, generation, records):
         count += 1
 
 def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retries=5000, use_align=False):
-    """Apply INDEL mutations to sequence. Returns (collapsed, consecutive_failures).
+    """Apply INDEL mutations to sequence.
 
     Args:
         max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
 
     Returns:
-        tuple: (collapsed: bool, consecutive_failures: int)
+        bool: True if array collapsed, False otherwise
     """
     count = 0
     target = np.random.poisson(0.5)
@@ -217,7 +217,7 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
         if result is None:
             consecutive_failures += 1
             if consecutive_failures >= max_retries:
-                return True, consecutive_failures  # Signal array collapse after max_retries consecutive failures
+                return True  # Signal array collapse after max_retries consecutive failures
             continue  # Retry with a different random position
 
         # Reset failure counter on success
@@ -252,141 +252,14 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
         indel_records.append((generation, indel_type, idx, pair_abs))
         count += 1
 
-    return False, consecutive_failures  # No collapse occurred
+    return False  # No collapse occurred
 
-def get_conversion_type(donor, receipt):
-    """Determine conversion type based on sequence comparison."""
-    if donor == receipt:
-        return "Identical"
-    elif len(donor) == len(receipt):
-        return "SNP"
-    else:
-        return "INDEL"
 
-def get_conversion_indel_records(generation, start, end, start_unit_start, start_unit_end,
-                               end_unit_start, end_unit_end, start_pair_abs, end_pair_abs,
-                               start_pair_unit_start, start_pair_unit_end,
-                               end_pair_unit_start, end_pair_unit_end, donor, receipt):
-    """Calculate INDEL records for conversions."""
-    records = []
-
-    if start_unit_start == end_unit_start and start_pair_unit_start == end_pair_unit_start:
-        if len(donor) > len(receipt):
-            records.append((generation, "INS", start_pair_abs, start_pair_abs + len(donor) - len(receipt)))
-        else:
-            records.append((generation, "DEL", end_pair_abs + len(receipt) - len(donor), end_pair_abs))
-    else:
-        start_donor_len = start_unit_end - start
-        start_receipt_len = start_pair_unit_end - start_pair_abs
-        if start_donor_len > start_receipt_len:
-            records.append((generation, "INS", start_pair_abs, start_pair_abs + start_donor_len - start_receipt_len))
-        elif start_donor_len < start_receipt_len:
-            records.append((generation, "DEL", start_pair_abs + start_donor_len - start_receipt_len, start_pair_abs))
-
-        end_donor_len = end - end_unit_start
-        end_receipt_len = end_pair_abs - end_pair_unit_start
-        if end_donor_len > end_receipt_len:
-            records.append((generation, "INS", end_pair_abs, end_pair_abs + end_donor_len - end_receipt_len))
-        elif end_donor_len < end_receipt_len:
-            records.append((generation, "DEL", end_pair_abs + end_donor_len - end_receipt_len, end_pair_abs))
-
-    return records
 
 def update_cenh3(cenh3_occupancy, indel_records):
     """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
     return cenh3_occupancy
 
-def apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures=0, max_retries=5000, use_align=False):
-    """Apply conversion mutations to sequence. Returns (collapsed, consecutive_failures).
-
-    Args:
-        consecutive_failures: Number of consecutive failures from previous mutation stage (default: 0)
-        max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
-
-    Returns:
-        tuple: (collapsed: bool, consecutive_failures: int)
-    """
-    count = 0
-    target = np.random.poisson(1)
-
-    while count < target:
-        start = random.randint(0, len(seq) - 1)
-        size = np.random.poisson(20)
-        end = start + size
-
-        start_unit_start, start_unit_end = find_unit_boundaries(pos, start)
-        end_unit_start, end_unit_end = find_unit_boundaries(pos, end)
-
-        if any(x is None for x in [start_unit_start, start_unit_end, end_unit_start, end_unit_end]):
-            consecutive_failures += 1
-            if consecutive_failures >= max_retries:
-                return True, consecutive_failures
-            continue
-
-        start_pair_unit_start, start_pair_unit_end = find_nth_unit_after(pos, start, 1)
-        end_pair_unit_start, end_pair_unit_end = find_nth_unit_after(pos, end, 1)
-
-        if any(x is None for x in [start_pair_unit_start, start_pair_unit_end, end_pair_unit_start, end_pair_unit_end]):
-            consecutive_failures += 1
-            if consecutive_failures >= max_retries:
-                return True, consecutive_failures
-            continue
-
-        start_unit_seq = get_sequence(seq, start_unit_start, start_unit_end)
-        end_unit_seq = get_sequence(seq, end_unit_start, end_unit_end)
-        start_pair_seq = get_sequence(seq, start_pair_unit_start, start_pair_unit_end)
-        end_pair_seq = get_sequence(seq, end_pair_unit_start, end_pair_unit_end)
-
-        if any(len(s) == 0 for s in [start_unit_seq, end_unit_seq, start_pair_seq, end_pair_seq]):
-            consecutive_failures += 1
-            if consecutive_failures >= max_retries:
-                return True, consecutive_failures
-            continue
-
-        if use_align:
-            try:
-                start_pair = find_aligned_position(start_unit_seq, start_pair_seq, start - start_unit_start)
-                end_pair = find_aligned_position(end_unit_seq, end_pair_seq, end - end_unit_start)
-            except IndexError:
-                continue
-        else:
-            start_pair = start - start_unit_start
-            end_pair = end - end_unit_start
-            # retry if position is zero NOTE: may remove this check
-            if start_pair == 0:
-                start_pair = -1
-            if end_pair == 0:
-                end_pair = -1
-
-        if start_pair == -1 or end_pair == -1:
-            continue
-
-        # Reset failure counter on success
-        consecutive_failures = 0
-
-        start_pair_abs = int(start_pair_unit_start) + start_pair
-        end_pair_abs = int(end_pair_unit_start) + end_pair
-
-        donor = "".join(seq[start:end])
-        receipt = "".join(seq[start_pair_abs:end_pair_abs])
-        conv_type = get_conversion_type(donor, receipt)
-
-        records.append((generation, "Conversion", start_pair_abs, receipt, donor, conv_type))
-# uncomment the code below to actually apply conversions...
-#        # Apply the conversion: replace receipt sequence with donor sequence
-#        seq[start_pair_abs:end_pair_abs] = list(donor)
-        count += 1
-
-        if conv_type == "INDEL":
-            conv_indels = get_conversion_indel_records(
-                generation, start, end, start_unit_start, start_unit_end,
-                end_unit_start, end_unit_end, start_pair_abs, end_pair_abs,
-                start_pair_unit_start, start_pair_unit_end,
-                end_pair_unit_start, end_pair_unit_end, donor, receipt
-            )
-            indel_records.extend(conv_indels)
-
-    return False, consecutive_failures
 
 def initialize_cenh3_occupancy(num_units):
     """Initialize CENH3 occupancy with normal distribution, rate 0.4 at the center (mode).
@@ -429,13 +302,7 @@ def introduce_mutations(sequence, generation, num_generations, unit_data, fast_m
         apply_snp_mutations(seq, generation, records)
 
         # Check if array collapsed during INDEL mutations
-        collapsed, consecutive_failures = apply_indel_mutations(seq, generation, pos, records, indel_records)
-        if collapsed:
-            print("Simulation complete: Array collapsed to zero")
-            break
-
-        # Check if array collapsed during conversion mutations, carrying over consecutive_failures
-        collapsed, consecutive_failures = apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures)
+        collapsed = apply_indel_mutations(seq, generation, pos, records, indel_records)
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
