@@ -319,7 +319,6 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
 
         if any(x is None for x in [start_unit_start, start_unit_end, end_unit_start, end_unit_end]):
             consecutive_failures += 1
-            print(consecutive_failures)
             if consecutive_failures >= max_retries:
                 return True, consecutive_failures
             continue
@@ -329,7 +328,6 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
 
         if any(x is None for x in [start_pair_unit_start, start_pair_unit_end, end_pair_unit_start, end_pair_unit_end]):
             consecutive_failures += 1
-            print(consecutive_failures)
             if consecutive_failures >= max_retries:
                 return True, consecutive_failures
             continue
@@ -341,7 +339,6 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
 
         if any(len(s) == 0 for s in [start_unit_seq, end_unit_seq, start_pair_seq, end_pair_seq]):
             consecutive_failures += 1
-            print(consecutive_failures)
             if consecutive_failures >= max_retries:
                 return True, consecutive_failures
             continue
