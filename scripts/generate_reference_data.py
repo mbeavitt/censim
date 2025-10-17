@@ -13,7 +13,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from censim.simulation import read_sequence, read_pos_file, introduce_mutations
+from censim.simulation import read_sequence, introduce_mutations
 
 
 def generate_reference_files():
@@ -34,7 +34,6 @@ def generate_reference_files():
 
     # Read input files once
     sequence = read_sequence("./data/15000copy_cen178.seq")
-    unit_data = read_pos_file("./data/15000copy_cen178.178bp.bed.pos")
 
     for seed, generations, description in test_cases:
         print(f"\nGenerating {description}: seed={seed}, generations={generations}")
@@ -42,7 +41,6 @@ def generate_reference_files():
         # Output files
         fasta_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.fa"
         record_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
-        pos_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.pos"
         cenh3_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.cenh3.txt"
 
         try:
@@ -51,8 +49,8 @@ def generate_reference_files():
             np.random.seed(seed)
 
             # Run simulation
-            mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-                sequence, 0, generations, unit_data
+            mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+                sequence, 0, generations
             )
 
             # Write output files (no FASTA header to match old CLI behavior)
@@ -64,10 +62,6 @@ def generate_reference_files():
                     gen, mut_type, idx, ref, mut, copy_num = record
                     f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
 
-            with open(pos_ref, "w") as f:
-                for pos in sorted(adjusted_pos):
-                    f.write(f"centro_{generations}gen\t{pos}\n")
-
             with open(cenh3_ref, "w") as f:
                 for idx, occupied in enumerate(cenh3_occupancy):
                     if occupied:
@@ -78,7 +72,6 @@ def generate_reference_files():
             print(f"✅ Generated {description}")
             print(f"   FASTA: {fasta_ref.name}")
             print(f"   Records: {record_ref.name}")
-            print(f"   Positions: {pos_ref.name}")
 
         except Exception as e:
             print(f"❌ Failed to generate {description}: {e}")

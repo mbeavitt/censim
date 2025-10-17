@@ -11,7 +11,7 @@ from pathlib import Path
 import random
 import numpy as np
 
-from censim.simulation import read_sequence, read_pos_file, introduce_mutations
+from censim.simulation import read_sequence, introduce_mutations
 
 
 @pytest.fixture
@@ -24,14 +24,11 @@ def test_setup():
     params = {
         'test_dir': test_dir,
         'input_seq': "./data/15000copy_cen178.seq",
-        'input_pos': "./data/15000copy_cen178.178bp.bed.pos",
     }
 
     # Verify required files exist
-    required_files = [params['input_seq'], params['input_pos']]
-    for file_path in required_files:
-        if not Path(file_path).exists():
-            pytest.fail(f"Required file not found: {file_path}")
+    if not Path(params['input_seq']).exists():
+        pytest.fail(f"Required file not found: {params['input_seq']}")
 
     yield params
 
@@ -47,7 +44,6 @@ def run_simulation(test_setup, generations, seed, suffix=""):
 
     fasta_out = params['test_dir'] / f"{base_name}.fa"
     record_out = params['test_dir'] / f"{base_name}.record.txt"
-    pos_out = params['test_dir'] / f"{base_name}.pos"
     cenh3_out = params['test_dir'] / f"{base_name}.cenh3.txt"
 
     # Set random seeds
@@ -56,11 +52,10 @@ def run_simulation(test_setup, generations, seed, suffix=""):
 
     # Read input files
     sequence = read_sequence(params['input_seq'])
-    unit_data = read_pos_file(params['input_pos'])
 
     # Run simulation
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
     )
 
     # Write output files
@@ -72,10 +67,6 @@ def run_simulation(test_setup, generations, seed, suffix=""):
             gen, mut_type, idx, ref, mut, copy_num = record
             f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
 
-    with open(pos_out, "w") as f:
-        for pos in sorted(adjusted_pos):
-            f.write(f"centro_{generations}gen\t{pos}\n")
-
     with open(cenh3_out, "w") as f:
         for idx, occupied in enumerate(cenh3_occupancy):
             if occupied:
@@ -83,7 +74,7 @@ def run_simulation(test_setup, generations, seed, suffix=""):
             else:
                 f.write(f"{idx}\t0\n")
 
-    return fasta_out, record_out, pos_out
+    return fasta_out, record_out
 
 
 def file_hash(file_path):
@@ -98,13 +89,12 @@ def test_same_seed_same_result_100gen(test_setup):
     generations = 100
 
     # Run simulation twice with same seed
-    fasta1, record1, pos1 = run_simulation(test_setup, generations, seed, "_run1")
-    fasta2, record2, pos2 = run_simulation(test_setup, generations, seed, "_run2")
+    fasta1, record1 = run_simulation(test_setup, generations, seed, "_run1")
+    fasta2, record2 = run_simulation(test_setup, generations, seed, "_run2")
 
     # Compare file contents using hashes
     assert file_hash(fasta1) == file_hash(fasta2), "FASTA outputs differ with same seed"
     assert file_hash(record1) == file_hash(record2), "Record outputs differ with same seed"
-    assert file_hash(pos1) == file_hash(pos2), "Position outputs differ with same seed"
 
 
 def test_same_seed_same_result_1000gen(test_setup):
@@ -113,13 +103,12 @@ def test_same_seed_same_result_1000gen(test_setup):
     generations = 1000
 
     # Run simulation twice with same seed
-    fasta1, record1, pos1 = run_simulation(test_setup, generations, seed, "_run1")
-    fasta2, record2, pos2 = run_simulation(test_setup, generations, seed, "_run2")
+    fasta1, record1 = run_simulation(test_setup, generations, seed, "_run1")
+    fasta2, record2 = run_simulation(test_setup, generations, seed, "_run2")
 
     # Compare file contents using hashes
     assert file_hash(fasta1) == file_hash(fasta2), "FASTA outputs differ with same seed"
     assert file_hash(record1) == file_hash(record2), "Record outputs differ with same seed"
-    assert file_hash(pos1) == file_hash(pos2), "Position outputs differ with same seed"
 
 
 def test_different_seeds_different_results(test_setup):
@@ -128,13 +117,12 @@ def test_different_seeds_different_results(test_setup):
     seed1, seed2 = 42, 123
 
     # Run simulations with different seeds
-    fasta1, record1, pos1 = run_simulation(test_setup, generations, seed1, "_seed1")
-    fasta2, record2, pos2 = run_simulation(test_setup, generations, seed2, "_seed2")
+    fasta1, record1 = run_simulation(test_setup, generations, seed1, "_seed1")
+    fasta2, record2 = run_simulation(test_setup, generations, seed2, "_seed2")
 
     # Results should be different
     assert file_hash(fasta1) != file_hash(fasta2), "FASTA outputs identical with different seeds"
     assert file_hash(record1) != file_hash(record2), "Record outputs identical with different seeds"
-    assert file_hash(pos1) != file_hash(pos2), "Position outputs identical with different seeds"
 
 
 def test_output_file_structure(test_setup):
@@ -142,57 +130,14 @@ def test_output_file_structure(test_setup):
     seed = 42
     generations = 50
 
-    fasta_out, record_out, pos_out = run_simulation(test_setup, generations, seed)
+    fasta_out, record_out = run_simulation(test_setup, generations, seed)
 
     # Check that output files exist and are non-empty
     assert fasta_out.exists(), "FASTA output file not created"
     assert record_out.exists(), "Record output file not created"
-    assert pos_out.exists(), "Position output file not created"
 
     assert fasta_out.stat().st_size > 0, "FASTA file is empty"
     assert record_out.stat().st_size > 0, "Record file is empty"
-    assert pos_out.stat().st_size > 0, "Position file is empty"
-
-    # Check position file format (should be tab-separated with 2 columns)
-    with open(pos_out, 'r') as f:
-        lines = f.readlines()
-        assert len(lines) > 0, "Position file has no content"
-
-        # Check first few lines have correct format
-        for i, line in enumerate(lines[:5]):
-            parts = line.strip().split('\t')
-            assert len(parts) == 2, f"Line {i+1} doesn't have 2 columns: {line.strip()}"
-            assert parts[1].isdigit(), f"Line {i+1} second column not numeric: {parts[1]}"
-
-
-def test_position_consistency(test_setup):
-    """Test that position files maintain 178bp spacing."""
-    seed = 42
-    generations = 100
-
-    _, _, pos_out = run_simulation(test_setup, generations, seed)
-
-    # Read positions
-    positions = []
-    with open(pos_out, 'r') as f:
-        for line in f:
-            parts = line.strip().split('\t')
-            positions.append(int(parts[1]))
-
-    # Check that positions are sorted
-    assert positions == sorted(positions), "Positions are not sorted"
-
-    # Check that all gaps are 178bp (allowing for indels that might change this)
-    gaps = [positions[i+1] - positions[i] for i in range(len(positions)-1)]
-
-    # Most gaps should be 178, but some variation is expected due to mutations
-    bp_178_count = sum(1 for gap in gaps if gap == 178)
-    total_gaps = len(gaps)
-
-    # At least 80% should still be 178bp (adjust threshold as needed)
-    ratio = bp_178_count / total_gaps if total_gaps > 0 else 0
-    assert ratio > 0.8, f"Too few 178bp gaps: {bp_178_count}/{total_gaps} = {ratio:.2%}"
-
 
 @pytest.mark.performance
 def test_small_simulation_performance(test_setup):
@@ -209,12 +154,11 @@ def test_small_simulation_performance(test_setup):
 
     # Read inputs
     sequence = read_sequence(test_setup['input_seq'])
-    unit_data = read_pos_file(test_setup['input_pos'])
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
     )
     duration = time.time() - start
 
@@ -243,12 +187,11 @@ def test_medium_simulation_performance(test_setup):
 
     # Read inputs
     sequence = read_sequence(test_setup['input_seq'])
-    unit_data = read_pos_file(test_setup['input_pos'])
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
     )
     duration = time.time() - start
 
@@ -277,12 +220,11 @@ def test_large_simulation_performance(test_setup):
 
     # Read inputs
     sequence = read_sequence(test_setup['input_seq'])
-    unit_data = read_pos_file(test_setup['input_pos'])
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
     )
     duration = time.time() - start
 
@@ -311,12 +253,11 @@ def test_extra_large_simulation_performance(test_setup):
 
     # Read inputs
     sequence = read_sequence(test_setup['input_seq'])
-    unit_data = read_pos_file(test_setup['input_pos'])
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
     )
     duration = time.time() - start
 
@@ -338,13 +279,12 @@ def test_extra_large_simulation_performance(test_setup):
 def test_multiple_seeds_reproducibility(test_setup, seed, generations):
     """Test reproducibility across multiple seed/generation combinations."""
     # Run twice with same parameters
-    fasta1, record1, pos1 = run_simulation(test_setup, generations, seed, "_run1")
-    fasta2, record2, pos2 = run_simulation(test_setup, generations, seed, "_run2")
+    fasta1, record1 = run_simulation(test_setup, generations, seed, "_run1")
+    fasta2, record2 = run_simulation(test_setup, generations, seed, "_run2")
 
     # Should be identical
     assert file_hash(fasta1) == file_hash(fasta2), f"Results differ for seed={seed}, gen={generations}"
     assert file_hash(record1) == file_hash(record2), f"Records differ for seed={seed}, gen={generations}"
-    assert file_hash(pos1) == file_hash(pos2), f"Positions differ for seed={seed}, gen={generations}"
 
 
 def test_seed_none_is_random(test_setup):
@@ -353,19 +293,17 @@ def test_seed_none_is_random(test_setup):
 
     # Read input files once
     sequence = read_sequence(test_setup['input_seq'])
-    unit_data = read_pos_file(test_setup['input_pos'])
 
     # Run without explicit seed twice (library will use random state)
     fasta_out1 = test_setup['test_dir'] / "random1.fa"
     record_out1 = test_setup['test_dir'] / "random1.record.txt"
-    pos_out1 = test_setup['test_dir'] / "random1.pos"
     cenh3_out1 = test_setup['test_dir'] / "random1.cenh3.txt"
 
     # First run - reset to a random state
     random.seed(None)
     np.random.seed(None)
-    mutated_sequence1, mutation_records1, adjusted_pos1, cenh3_occupancy1, _ = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence1, mutation_records1, cenh3_occupancy1, _ = introduce_mutations(
+        sequence, 0, generations
     )
 
     with open(fasta_out1, "w") as f:
@@ -374,9 +312,6 @@ def test_seed_none_is_random(test_setup):
         for record in mutation_records1:
             gen, mut_type, idx, ref, mut, copy_num = record
             f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
-    with open(pos_out1, "w") as f:
-        for pos in sorted(adjusted_pos1):
-            f.write(f"centro_{generations}gen\t{pos}\n")
     with open(cenh3_out1, "w") as f:
         for idx, occupied in enumerate(cenh3_occupancy1):
             f.write(f"{idx}\t{'1' if occupied else '0'}\n")
@@ -384,13 +319,12 @@ def test_seed_none_is_random(test_setup):
     # Second run - reset to a different random state
     fasta_out2 = test_setup['test_dir'] / "random2.fa"
     record_out2 = test_setup['test_dir'] / "random2.record.txt"
-    pos_out2 = test_setup['test_dir'] / "random2.pos"
     cenh3_out2 = test_setup['test_dir'] / "random2.cenh3.txt"
 
     random.seed(None)
     np.random.seed(None)
-    mutated_sequence2, mutation_records2, adjusted_pos2, cenh3_occupancy2, _ = introduce_mutations(
-        sequence, 0, generations, unit_data
+    mutated_sequence2, mutation_records2, cenh3_occupancy2, _ = introduce_mutations(
+        sequence, 0, generations
     )
 
     with open(fasta_out2, "w") as f:
@@ -399,9 +333,6 @@ def test_seed_none_is_random(test_setup):
         for record in mutation_records2:
             gen, mut_type, idx, ref, mut, copy_num = record
             f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
-    with open(pos_out2, "w") as f:
-        for pos in sorted(adjusted_pos2):
-            f.write(f"centro_{generations}gen\t{pos}\n")
     with open(cenh3_out2, "w") as f:
         for idx, occupied in enumerate(cenh3_occupancy2):
             f.write(f"{idx}\t{'1' if occupied else '0'}\n")
@@ -437,23 +368,19 @@ def test_regression_against_reference_small(test_setup, reference_data_dir):
     # Reference files
     fasta_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.fa"
     record_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
-    pos_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.pos"
 
     # Check reference files exist
     assert fasta_ref.exists(), f"Reference FASTA not found: {fasta_ref}"
     assert record_ref.exists(), f"Reference record not found: {record_ref}"
-    assert pos_ref.exists(), f"Reference position not found: {pos_ref}"
 
     # Run new simulation
-    fasta_new, record_new, pos_new = run_simulation(test_setup, generations, seed, "_regression")
+    fasta_new, record_new = run_simulation(test_setup, generations, seed, "_regression")
 
     # Compare against reference
     assert file_hash(fasta_new) == file_hash(fasta_ref), \
         f"FASTA output differs from reference for {description}"
     assert file_hash(record_new) == file_hash(record_ref), \
         f"Record output differs from reference for {description}"
-    assert file_hash(pos_new) == file_hash(pos_ref), \
-        f"Position output differs from reference for {description}"
 
 
 @pytest.mark.regression
@@ -466,23 +393,19 @@ def test_regression_against_reference_medium(test_setup, reference_data_dir):
     # Reference files
     fasta_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.fa"
     record_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
-    pos_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.pos"
 
     # Check reference files exist
     assert fasta_ref.exists(), f"Reference FASTA not found: {fasta_ref}"
     assert record_ref.exists(), f"Reference record not found: {record_ref}"
-    assert pos_ref.exists(), f"Reference position not found: {pos_ref}"
 
     # Run new simulation
-    fasta_new, record_new, pos_new = run_simulation(test_setup, generations, seed, "_regression")
+    fasta_new, record_new, = run_simulation(test_setup, generations, seed, "_regression")
 
     # Compare against reference
     assert file_hash(fasta_new) == file_hash(fasta_ref), \
         f"FASTA output differs from reference for {description}"
     assert file_hash(record_new) == file_hash(record_ref), \
         f"Record output differs from reference for {description}"
-    assert file_hash(pos_new) == file_hash(pos_ref), \
-        f"Position output differs from reference for {description}"
 
 
 @pytest.mark.regression
@@ -495,23 +418,19 @@ def test_regression_against_reference_large(test_setup, reference_data_dir):
     # Reference files
     fasta_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.fa"
     record_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
-    pos_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.pos"
 
     # Check reference files exist
     assert fasta_ref.exists(), f"Reference FASTA not found: {fasta_ref}"
     assert record_ref.exists(), f"Reference record not found: {record_ref}"
-    assert pos_ref.exists(), f"Reference position not found: {pos_ref}"
 
     # Run new simulation
-    fasta_new, record_new, pos_new = run_simulation(test_setup, generations, seed, "_regression")
+    fasta_new, record_new = run_simulation(test_setup, generations, seed, "_regression")
 
     # Compare against reference
     assert file_hash(fasta_new) == file_hash(fasta_ref), \
         f"FASTA output differs from reference for {description}"
     assert file_hash(record_new) == file_hash(record_ref), \
         f"Record output differs from reference for {description}"
-    assert file_hash(pos_new) == file_hash(pos_ref), \
-        f"Position output differs from reference for {description}"
 
 
 @pytest.mark.regression
@@ -527,19 +446,16 @@ def test_all_regression_cases(test_setup, reference_data_dir, test_case):
     # Reference files
     fasta_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.fa"
     record_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.record.txt"
-    pos_ref = reference_data_dir / f"{description}_seed{seed}_{generations}gen.pos"
 
     # Skip if reference files don't exist
-    if not all([fasta_ref.exists(), record_ref.exists(), pos_ref.exists()]):
+    if not all([fasta_ref.exists(), record_ref.exists()]):
         pytest.skip(f"Reference files missing for {description}")
 
     # Run new simulation
-    fasta_new, record_new, pos_new = run_simulation(test_setup, generations, seed, f"_{description}_regression")
+    fasta_new, record_new = run_simulation(test_setup, generations, seed, f"_{description}_regression")
 
     # Compare against reference
     assert file_hash(fasta_new) == file_hash(fasta_ref), \
         f"FASTA output differs from reference for {description}"
     assert file_hash(record_new) == file_hash(record_ref), \
         f"Record output differs from reference for {description}"
-    assert file_hash(pos_new) == file_hash(pos_ref), \
-        f"Position output differs from reference for {description}"

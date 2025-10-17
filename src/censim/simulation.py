@@ -3,75 +3,8 @@ import numpy as np
 import argparse
 import re
 import pandas as pd
-import bisect
-from Bio import Align
 
-# Global aligner instance to avoid recreation overhead
-_global_aligner = None
 
-def get_aligner():
-    """Get or create the global pairwise aligner instance."""
-    global _global_aligner
-    if _global_aligner is None:
-        _global_aligner = Align.PairwiseAligner()
-        _global_aligner.match_score = 2
-        _global_aligner.mismatch_score = -1
-        _global_aligner.open_gap_score = -10
-        _global_aligner.extend_gap_score = -1
-    return _global_aligner
-
-def find_unit_boundaries(unit_positions, idx, fast_mode=True):
-    """Fast unit boundary lookup using simple modulo arithmetic = O(1).
-    If repeat size is not 178bp, fallback to slower binary search = O(log n)"""
-    if len(unit_positions) == 0:
-        return None, None
-
-    # Find the last unit start <= idx
-    if fast_mode:
-        shift = idx % 178
-        unit_start = idx - shift
-        unit_end = idx + (178 - shift)
-    else:
-        pos = bisect.bisect_right(unit_positions, idx) - 1
-        if pos < 0:
-            return None, None
-
-        unit_start = unit_positions[pos]
-
-        # Find the next unit start > idx
-        if pos + 1 < len(unit_positions):
-            unit_end = unit_positions[pos + 1]
-        else:
-            return unit_start, None
-
-    return unit_start, unit_end
-
-def find_nth_unit_after(unit_positions, idx, n, fast_mode=True):
-    """Find the nth unit after the given index."""
-    if len(unit_positions) == 0 or n <= 0:
-        return None, None
-
-    if fast_mode:
-        shift = idx % 178
-        unit_start = idx - shift + (178 * n)
-        unit_end = idx + (178 - shift) + (178 * n)
-
-    else:
-        # Find first unit start > idx
-        pos = bisect.bisect_right(unit_positions, idx)
-
-        if pos + n - 1 >= len(unit_positions):
-            return None, None
-
-        start_pos = pos + n - 1
-        unit_start = unit_positions[start_pos]
-
-        if start_pos + 1 < len(unit_positions):
-            unit_end = unit_positions[start_pos + 1]
-        else:
-            return unit_start, None
-
-    return unit_start, unit_end
 
 def read_sequence(file_name):
     with open(file_name, "r") as file:
@@ -126,60 +59,6 @@ def adjust_pos_coordinates(pos1, pos2):
 
     return positions.tolist()
 
-def get_sequence(sequence, start, end):
-    """Retrieve the sequence from the given sequence string, starting from 'start' position (0-based inclusive) to 'end' position (0-based exclusive)."""
-    return "".join(sequence[start:end])  # Ensure the result is a string
-
-def find_aligned_position(seq1, seq2, pos_in_seq1):
-    """Find corresponding position in seq2 for a given position in seq1 via pairwise alignment.
-
-    Args:
-        seq1: First sequence
-        seq2: Second sequence
-        pos_in_seq1: Position in seq1 (0-based)
-
-    Returns:
-        int: Corresponding position in seq2, or -1 if not found
-    """
-    aligner = get_aligner()
-    alignments = aligner.align(seq1, seq2)
-    alignment = alignments[0]
-
-    # Extract aligned sequences
-    align_seq1 = str(alignment[0])
-    align_seq2 = str(alignment[1])
-
-    # Find corresponding position
-    align_pos1, align_pos2 = 0, 0
-
-    for i in range(len(align_seq1)):
-        if align_seq1[i] != '-':
-            align_pos1 += 1
-        if align_seq2[i] != '-':
-            align_pos2 += 1
-        if align_pos1 == pos_in_seq1:
-            return align_pos2
-
-    return -1  # Position not found
-
-def get_unit_sequences(seq, pos, idx, copy_num):
-    """Get unit sequences for alignment, returns None if invalid."""
-    unit_start, unit_end = find_unit_boundaries(pos, idx)
-    if unit_start is None or unit_end is None:
-        return None
-
-    pair_start, pair_end = find_nth_unit_after(pos, idx, copy_num)
-    if pair_start is None or pair_end is None:
-        return None
-
-    unit_seq = get_sequence(seq, unit_start, unit_end)
-    pair_seq = get_sequence(seq, pair_start, pair_end)
-
-    if len(unit_seq) == 0 or len(pair_seq) == 0:
-        return None
-
-    return unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq
-
 def apply_snp_mutations(seq, generation, records):
     """Apply SNP mutations to sequence."""
     count = 0
@@ -195,10 +74,15 @@ def apply_snp_mutations(seq, generation, records):
         seq[idx] = new_base
         count += 1
 
-def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retries=5000, use_align=False):
-    """Apply INDEL mutations to sequence.
+def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000):
+    """Apply INDEL mutations to sequence using whole repeats with modulo arithmetic.
 
     Args:
+        seq: Sequence as list
+        generation: Current generation number
+        records: Mutation records list
+        indel_records: INDEL coordinate adjustment records
+        repeat_size: Size of each repeat unit in bp (default: 178)
         max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
 
     Returns:
@@ -209,47 +93,50 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
     consecutive_failures = 0
 
     while count < target:
-        idx = random.randint(0, len(seq) - 1)
+        # Recalculate number of units based on current sequence length
+        num_units = len(seq) // repeat_size
+
+        # Pick a random unit number
+        unit_num = random.randint(0, num_units - 1)
         indel_type = random.choice(["INS", "DEL"])
         copy_num = np.random.poisson(7.6)
 
-        result = get_unit_sequences(seq, pos, idx, copy_num)
-        if result is None:
+        # Skip if copy_num is 0 or negative
+        if copy_num <= 0:
+            continue
+
+        # Calculate target unit (copy_num repeats away)
+        target_unit_num = unit_num + copy_num
+
+        # Bounds check: ensure target unit exists
+        if target_unit_num >= num_units:
             consecutive_failures += 1
             if consecutive_failures >= max_retries:
-                return True  # Signal array collapse after max_retries consecutive failures
-            continue  # Retry with a different random position
+                return True  # Signal array collapse
+            continue
 
         # Reset failure counter on success
         consecutive_failures = 0
 
-        unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq = result
+        # Calculate boundaries using modulo arithmetic (whole repeats only)
+        unit_start = unit_num * repeat_size
+        target_start = target_unit_num * repeat_size
 
-        if use_align:
-            try:
-                pair_pos = find_aligned_position(unit_seq, pair_seq, idx - unit_start)
-            except IndexError:
-                continue
-        else:
-            pair_pos = idx - unit_start
-            # retry if position is zero NOTE: may remove this check
-            if pair_pos == 0:
-                pair_pos = -1
-
-        if pair_pos == -1:
-            continue
-
-        pair_abs = int(pair_start) + pair_pos
+        # Extract the sequence between the two repeat boundaries
+        indel_seq = "".join(seq[unit_start:target_start])
 
         if indel_type == "INS":
-            ins_seq = "".join(seq[idx:pair_abs])
-            records.append((generation, indel_type, idx, seq[idx - 1], "".join(seq[idx - 1:pair_abs]), copy_num))
-            seq[idx:idx] = list(ins_seq)
+            # Insert the sequence at unit_start
+            records.append((generation, indel_type, unit_start, seq[unit_start - 1] if unit_start > 0 else '',
+                          seq[unit_start - 1] if unit_start > 0 else '' + indel_seq, copy_num))
+            seq[unit_start:unit_start] = list(indel_seq)
         else:  # DEL
-            records.append((generation, indel_type, idx, "".join(seq[idx - 1:pair_abs]), "".join(seq[idx - 1]), copy_num))
-            del seq[idx:pair_abs]
+            # Delete the sequence from unit_start to target_start
+            records.append((generation, indel_type, unit_start, indel_seq,
+                          seq[unit_start - 1] if unit_start > 0 else '', copy_num))
+            del seq[unit_start:target_start]
 
-        indel_records.append((generation, indel_type, idx, pair_abs))
+        indel_records.append((generation, indel_type, unit_start, target_start))
         count += 1
 
     return False  # No collapse occurred
@@ -279,37 +166,37 @@ def initialize_cenh3_occupancy(num_units):
 
     return cenh3_occupancy
 
-def introduce_mutations(sequence, generation, num_generations, unit_data, fast_mode=True):
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
     """Introduce mutations into sequence over multiple generations.
 
+    Args:
+        sequence: Initial DNA sequence string
+        generation: Starting generation number
+        num_generations: Number of generations to simulate
+        repeat_size: Size of each repeat unit in bp (default: 178)
+
     Returns:
-        tuple: (mutated_sequence, mutation_records, adjusted_positions, cenh3_occupancy, collapsed)
+        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed)
             where collapsed is True if the array collapsed to zero, False otherwise
     """
     seq = list(sequence)
     records = []
-    pos = np.sort(unit_data["start"].values if isinstance(unit_data, pd.DataFrame) else np.array(unit_data))
 
-    # Initialize CENH3 occupancy
-    num_units = len(pos)
+    # Initialize CENH3 occupancy based on initial sequence length
+    num_units = len(sequence) // repeat_size
     cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
     collapsed = False
     for _ in range(num_generations):
         generation += 1
-        indel_records = []
 
         apply_snp_mutations(seq, generation, records)
 
         # Check if array collapsed during INDEL mutations
-        collapsed = apply_indel_mutations(seq, generation, pos, records, indel_records)
+        collapsed = apply_indel_mutations(seq, generation, records, [], repeat_size)
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
 
-        if indel_records:
-            pos = np.array(adjust_pos_coordinates(pos.tolist(), indel_records))
-            cenh3_occupancy = update_cenh3(cenh3_occupancy, indel_records)
-
-    return "".join(seq), records, np.sort(pos).tolist(), cenh3_occupancy, collapsed
+    return "".join(seq), records, cenh3_occupancy, collapsed
 
