@@ -195,7 +195,7 @@ def apply_snp_mutations(seq, generation, records):
         seq[idx] = new_base
         count += 1
 
-def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retries=5000):
+def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retries=5000, use_align=False):
     """Apply INDEL mutations to sequence. Returns (collapsed, consecutive_failures).
 
     Args:
@@ -225,10 +225,16 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
 
         unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq = result
 
-        try:
-            pair_pos = find_aligned_position(unit_seq, pair_seq, idx - unit_start)
-        except IndexError:
-            continue
+        if use_align:
+            try:
+                pair_pos = find_aligned_position(unit_seq, pair_seq, idx - unit_start)
+            except IndexError:
+                continue
+        else:
+            pair_pos = idx - unit_start
+            # retry if position is zero NOTE: may remove this check
+            if pair_pos == 0:
+                pair_pos = -1
 
         if pair_pos == -1:
             continue
@@ -290,7 +296,7 @@ def update_cenh3(cenh3_occupancy, indel_records):
     """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
     return cenh3_occupancy
 
-def apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures=0, max_retries=5000):
+def apply_conversion_mutations(seq, generation, pos, records, indel_records, consecutive_failures=0, max_retries=5000, use_align=False):
     """Apply conversion mutations to sequence. Returns (collapsed, consecutive_failures).
 
     Args:
@@ -340,11 +346,20 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
                 return True, consecutive_failures
             continue
 
-        try:
-            start_pair = find_aligned_position(start_unit_seq, start_pair_seq, start - start_unit_start)
-            end_pair = find_aligned_position(end_unit_seq, end_pair_seq, end - end_unit_start)
-        except IndexError:
-            continue
+        if use_align:
+            try:
+                start_pair = find_aligned_position(start_unit_seq, start_pair_seq, start - start_unit_start)
+                end_pair = find_aligned_position(end_unit_seq, end_pair_seq, end - end_unit_start)
+            except IndexError:
+                continue
+        else:
+            start_pair = start - start_unit_start
+            end_pair = end - end_unit_start
+            # retry if position is zero NOTE: may remove this check
+            if start_pair == 0:
+                start_pair = -1
+            if end_pair == 0:
+                end_pair = -1
 
         if start_pair == -1 or end_pair == -1:
             continue
