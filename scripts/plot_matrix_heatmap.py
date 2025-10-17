@@ -3,8 +3,8 @@
 Create combined plot with rotated distance matrix on top and correlation heatmap below.
 """
 
+import argparse
 import numpy as np
-import sys
 import matplotlib.pyplot as plt
 from scipy.ndimage import rotate
 from pathlib import Path
@@ -98,30 +98,69 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
 
 def main():
     """Create combined matrix and heatmap plot."""
+    parser = argparse.ArgumentParser(
+        description='Create combined plot with rotated distance matrix on top and correlation heatmap below.'
+    )
 
-    # Configuration
-    window_size = 100  # Fixed window size
+    parser.add_argument(
+        '-i', '--input',
+        dest='data_file',
+        default='./data/2191000generation.out.fa',
+        help='Path to input sequence data file (default: ./data/2191000generation.out.fa)'
+    )
 
-    if len(sys.argv) > 1:
-        data_file = sys.argv[1]
-    else:
-        data_file = "./data/2191000generation.out.fa"
+    parser.add_argument(
+        '-o', '--output',
+        dest='output_dir',
+        default='./output/matrix_hm',
+        help='Output directory for generated plots (default: ./output/matrix_hm)'
+    )
+
+    parser.add_argument(
+        '-w', '--window-size',
+        type=int,
+        default=100,
+        help='Window size for sliding window correlation (default: 100)'
+    )
+
+    parser.add_argument(
+        '--r-min',
+        type=float,
+        default=0.006,
+        help='Minimum radius for correlation analysis (default: 0.006)'
+    )
+
+    parser.add_argument(
+        '--r-max',
+        type=float,
+        default=0.1,
+        help='Maximum radius for correlation analysis (default: 0.1)'
+    )
+
+    parser.add_argument(
+        '--n-radii',
+        type=int,
+        default=20,
+        help='Number of radii to use in range [r-min, r-max] (default: 20)'
+    )
+
+    args = parser.parse_args()
 
     print("=" * 70)
     print("Matrix + Correlation Heatmap Plot")
     print("=" * 70)
-    print(f"Window size: {window_size}")
-    print(f"Radius range: [0.006, 0.1]")
-    print(f"Data file: {data_file}")
+    print(f"Window size: {args.window_size}")
+    print(f"Radius range: [{args.r_min}, {args.r_max}]")
+    print(f"Data file: {args.data_file}")
     print()
 
     # Ensure output directory exists
-    output_dir = Path("./output/matrix_hm")
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
     print("Loading sequence data...")
-    with open(data_file, "r") as file:
+    with open(args.data_file, "r") as file:
         contents = file.read().strip()
 
     repeat_len = 178
@@ -138,30 +177,29 @@ def main():
     D = hamming_distance_matrix(identity_matrix)
     print(f"Distance matrix computed (mean: {D.mean():.3f})")
 
-    # Choose radii in the focused range [0.006, 0.1]
-    print("\nChoosing radii in range [0.006, 0.1]...")
-    n_radii = 20  # Use more radii for smoother coverage
-    r_values = np.linspace(0.006, 0.1, n_radii)
+    # Choose radii in the specified range
+    print(f"\nChoosing radii in range [{args.r_min}, {args.r_max}]...")
+    r_values = np.linspace(args.r_min, args.r_max, args.n_radii)
     print(f"Selected {len(r_values)} radii")
 
     # Compute sliding window
     print(f"\nComputing sliding window local correlation...")
     positions, mean_corr, max_corr = sliding_window_local_correlation(
-        D, window_size, r_values
+        D, args.window_size, r_values
     )
     print(f"Computed {len(positions)} windows")
 
     # Create combined plot
     print("\nCreating combined matrix + heatmap plot...")
     # Extract filename stem from data file for output naming
-    data_stem = Path(data_file).stem  # e.g., "2191000generation.out"
+    data_stem = Path(args.data_file).stem  # e.g., "2191000generation.out"
     output_file = output_dir / f"{data_stem}_matrix_heatmap.png"
 
     # Extract generation number from filename
     generation_match = re.search(r'(\d+)generation', data_stem)
     generation = int(generation_match.group(1)) if generation_match else None
 
-    plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
+    plot_matrix_and_heatmap(D, positions, mean_corr, r_values, args.window_size,
                            generation=generation, output_file=str(output_file))
 
     print("\n" + "=" * 70)
