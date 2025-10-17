@@ -5,10 +5,13 @@ Ensures that identical seeds produce identical results and different seeds produ
 """
 
 import pytest
-import subprocess
 import hashlib
 import shutil
 from pathlib import Path
+import random
+import numpy as np
+
+from censim.simulation import read_sequence, read_pos_file, introduce_mutations
 
 
 @pytest.fixture
@@ -47,17 +50,38 @@ def run_simulation(test_setup, generations, seed, suffix=""):
     pos_out = params['test_dir'] / f"{base_name}.pos"
     cenh3_out = params['test_dir'] / f"{base_name}.cenh3.txt"
 
-    cmd = [
-        "python", "-m", "censim.simulation",
-        params['input_seq'], str(generations), params['input_pos'],
-        str(fasta_out), str(record_out), str(pos_out), str(cenh3_out),
-        "--seed", str(seed)
-    ]
+    # Set random seeds
+    random.seed(seed)
+    np.random.seed(seed)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    # Read input files
+    sequence = read_sequence(params['input_seq'])
+    unit_data = read_pos_file(params['input_pos'])
 
-    if result.returncode != 0:
-        pytest.fail(f"Simulation failed: {result.stderr}")
+    # Run simulation
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+
+    # Write output files
+    with open(fasta_out, "w") as f:
+        f.write(mutated_sequence + '\n')
+
+    with open(record_out, "w") as f:
+        for record in mutation_records:
+            gen, mut_type, idx, ref, mut, copy_num = record
+            f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
+
+    with open(pos_out, "w") as f:
+        for pos in sorted(adjusted_pos):
+            f.write(f"centro_{generations}gen\t{pos}\n")
+
+    with open(cenh3_out, "w") as f:
+        for idx, occupied in enumerate(cenh3_occupancy):
+            if occupied:
+                f.write(f"{idx}\t1\n")
+            else:
+                f.write(f"{idx}\t0\n")
 
     return fasta_out, record_out, pos_out
 
@@ -173,84 +197,120 @@ def test_position_consistency(test_setup):
 @pytest.mark.performance
 def test_small_simulation_performance(test_setup):
     """Test that small simulations complete within reasonable time."""
-    from censim.performance import benchmark_simulation
+    import time
 
-    cmd = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], "10", test_setup['input_pos'],
-        str(test_setup['test_dir'] / "perf_test.fa"),
-        str(test_setup['test_dir'] / "perf_test.record.txt"),
-        str(test_setup['test_dir'] / "perf_test.pos"),
-        str(test_setup['test_dir'] / "perf_test.cenh3.txt"),
-        "--seed", "42"
-    ]
+    generations = 10
+    seed = 42
 
-    duration, result = benchmark_simulation("small_simulation_10gen", cmd, 10, 42)
+    # Set seed
+    random.seed(seed)
+    np.random.seed(seed)
 
-    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    # Read inputs
+    sequence = read_sequence(test_setup['input_seq'])
+    unit_data = read_pos_file(test_setup['input_pos'])
+
+    # Time the simulation
+    start = time.time()
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+    duration = time.time() - start
+
+    # Write outputs (not timed, but needed for test completeness)
+    with open(test_setup['test_dir'] / "perf_test.fa", "w") as f:
+        f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
+
     assert duration < 10, f"Small simulation took too long: {duration:.2f}s"
 
 
 @pytest.mark.performance
 def test_medium_simulation_performance(test_setup):
     """Test performance for 100 generation simulation."""
-    from censim.performance import benchmark_simulation
+    import time
 
-    cmd = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], "100", test_setup['input_pos'],
-        str(test_setup['test_dir'] / "perf_test_100.fa"),
-        str(test_setup['test_dir'] / "perf_test_100.record.txt"),
-        str(test_setup['test_dir'] / "perf_test_100.pos"),
-        str(test_setup['test_dir'] / "perf_test_100.cenh3.txt"),
-        "--seed", "42"
-    ]
+    generations = 100
+    seed = 42
 
-    duration, result = benchmark_simulation("medium_simulation_100gen", cmd, 100, 42)
+    # Set seed
+    random.seed(seed)
+    np.random.seed(seed)
 
-    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    # Read inputs
+    sequence = read_sequence(test_setup['input_seq'])
+    unit_data = read_pos_file(test_setup['input_pos'])
+
+    # Time the simulation
+    start = time.time()
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+    duration = time.time() - start
+
+    # Write outputs
+    with open(test_setup['test_dir'] / "perf_test_100.fa", "w") as f:
+        f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
+
     assert duration < 60, f"Medium simulation took too long: {duration:.2f}s"
 
 
 @pytest.mark.performance
 def test_large_simulation_performance(test_setup):
     """Test performance for 1000 generation simulation."""
-    from censim.performance import benchmark_simulation
+    import time
 
-    cmd = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], "1000", test_setup['input_pos'],
-        str(test_setup['test_dir'] / "perf_test_1000.fa"),
-        str(test_setup['test_dir'] / "perf_test_1000.record.txt"),
-        str(test_setup['test_dir'] / "perf_test_1000.pos"),
-        str(test_setup['test_dir'] / "perf_test_1000.cenh3.txt"),
-        "--seed", "42"
-    ]
+    generations = 1000
+    seed = 42
 
-    duration, result = benchmark_simulation("large_simulation_1000gen", cmd, 1000, 42)
+    # Set seed
+    random.seed(seed)
+    np.random.seed(seed)
 
-    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    # Read inputs
+    sequence = read_sequence(test_setup['input_seq'])
+    unit_data = read_pos_file(test_setup['input_pos'])
+
+    # Time the simulation
+    start = time.time()
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+    duration = time.time() - start
+
+    # Write outputs
+    with open(test_setup['test_dir'] / "perf_test_1000.fa", "w") as f:
+        f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
+
     assert duration < 600, f"Large simulation took too long: {duration:.2f}s"
 
 
 @pytest.mark.performance
 def test_extra_large_simulation_performance(test_setup):
     """Test performance for 10,000 generation simulation."""
-    from censim.performance import benchmark_simulation
+    import time
 
-    cmd = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], "10000", test_setup['input_pos'],
-        str(test_setup['test_dir'] / "perf_test_10000.fa"),
-        str(test_setup['test_dir'] / "perf_test_10000.record.txt"),
-        str(test_setup['test_dir'] / "perf_test_10000.pos"),
-        str(test_setup['test_dir'] / "perf_test_10000.cenh3.txt"),
-        "--seed", "42"
-    ]
+    generations = 10000
+    seed = 42
 
-    duration, result = benchmark_simulation("extra_large_simulation_10000gen", cmd, 10000, 42)
+    # Set seed
+    random.seed(seed)
+    np.random.seed(seed)
 
-    assert result.returncode == 0, f"Simulation failed: {result.stderr}"
+    # Read inputs
+    sequence = read_sequence(test_setup['input_seq'])
+    unit_data = read_pos_file(test_setup['input_pos'])
+
+    # Time the simulation
+    start = time.time()
+    mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+    duration = time.time() - start
+
+    # Write outputs
+    with open(test_setup['test_dir'] / "perf_test_10000.fa", "w") as f:
+        f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
+
     assert duration < 3600, f"Extra large simulation took too long: {duration:.2f}s"
 
 
@@ -275,34 +335,64 @@ def test_seed_none_is_random(test_setup):
     """Test that not providing a seed produces different results each time."""
     generations = 50
 
-    # Run without seed twice
-    cmd1 = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], str(generations), test_setup['input_pos'],
-        str(test_setup['test_dir'] / "random1.fa"),
-        str(test_setup['test_dir'] / "random1.record.txt"),
-        str(test_setup['test_dir'] / "random1.pos"),
-        str(test_setup['test_dir'] / "random1.cenh3.txt")
-    ]
+    # Read input files once
+    sequence = read_sequence(test_setup['input_seq'])
+    unit_data = read_pos_file(test_setup['input_pos'])
 
-    cmd2 = [
-        "python", "-m", "censim.simulation",
-        test_setup['input_seq'], str(generations), test_setup['input_pos'],
-        str(test_setup['test_dir'] / "random2.fa"),
-        str(test_setup['test_dir'] / "random2.record.txt"),
-        str(test_setup['test_dir'] / "random2.pos"),
-        str(test_setup['test_dir'] / "random2.cenh3.txt")
-    ]
+    # Run without explicit seed twice (library will use random state)
+    fasta_out1 = test_setup['test_dir'] / "random1.fa"
+    record_out1 = test_setup['test_dir'] / "random1.record.txt"
+    pos_out1 = test_setup['test_dir'] / "random1.pos"
+    cenh3_out1 = test_setup['test_dir'] / "random1.cenh3.txt"
 
-    result1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=60)
-    result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=60)
+    # First run - reset to a random state
+    random.seed(None)
+    np.random.seed(None)
+    mutated_sequence1, mutation_records1, adjusted_pos1, cenh3_occupancy1, _ = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
 
-    assert result1.returncode == 0, f"First random simulation failed: {result1.stderr}"
-    assert result2.returncode == 0, f"Second random simulation failed: {result2.stderr}"
+    with open(fasta_out1, "w") as f:
+        f.write(mutated_sequence1 + '\n')
+    with open(record_out1, "w") as f:
+        for record in mutation_records1:
+            gen, mut_type, idx, ref, mut, copy_num = record
+            f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
+    with open(pos_out1, "w") as f:
+        for pos in sorted(adjusted_pos1):
+            f.write(f"centro_{generations}gen\t{pos}\n")
+    with open(cenh3_out1, "w") as f:
+        for idx, occupied in enumerate(cenh3_occupancy1):
+            f.write(f"{idx}\t{'1' if occupied else '0'}\n")
+
+    # Second run - reset to a different random state
+    fasta_out2 = test_setup['test_dir'] / "random2.fa"
+    record_out2 = test_setup['test_dir'] / "random2.record.txt"
+    pos_out2 = test_setup['test_dir'] / "random2.pos"
+    cenh3_out2 = test_setup['test_dir'] / "random2.cenh3.txt"
+
+    random.seed(None)
+    np.random.seed(None)
+    mutated_sequence2, mutation_records2, adjusted_pos2, cenh3_occupancy2, _ = introduce_mutations(
+        sequence, 0, generations, unit_data
+    )
+
+    with open(fasta_out2, "w") as f:
+        f.write(mutated_sequence2 + '\n')
+    with open(record_out2, "w") as f:
+        for record in mutation_records2:
+            gen, mut_type, idx, ref, mut, copy_num = record
+            f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
+    with open(pos_out2, "w") as f:
+        for pos in sorted(adjusted_pos2):
+            f.write(f"centro_{generations}gen\t{pos}\n")
+    with open(cenh3_out2, "w") as f:
+        for idx, occupied in enumerate(cenh3_occupancy2):
+            f.write(f"{idx}\t{'1' if occupied else '0'}\n")
 
     # Results should likely be different (though theoretically could be same)
-    record1_hash = file_hash(test_setup['test_dir'] / "random1.record.txt")
-    record2_hash = file_hash(test_setup['test_dir'] / "random2.record.txt")
+    record1_hash = file_hash(record_out1)
+    record2_hash = file_hash(record_out2)
 
     # This test might occasionally fail due to random chance, but very unlikely
     assert record1_hash != record2_hash, "Two unseeded runs produced identical results (very unlikely but possible)"

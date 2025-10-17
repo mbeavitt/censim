@@ -7,10 +7,4 @@ mkdir -p output/fasta output/records output/generation_unit_pos output/cenh3
 GENERATIONS=${1:-1000}
 
 # Test Simulation
-py-spy record -o profile.svg -- python -m censim.simulation \
-    ./data/15000copy_cen178.seq $GENERATIONS \
-    ./data/15000copy_cen178.178bp.bed.pos \
-    ./output/fasta/${GENERATIONS}generation.out.fa \
-    ./output/records/${GENERATIONS}generation.record.txt \
-    ./output/generation_unit_pos/${GENERATIONS}generation.unit.pos \
-    ./output/cenh3/${GENERATIONS}generation.cenh3.txt \
+py-spy record -o profile.svg -- python scripts/test_sim.py $GENERATIONS
