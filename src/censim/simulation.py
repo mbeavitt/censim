@@ -130,16 +130,26 @@ def get_sequence(sequence, start, end):
     """Retrieve the sequence from the given sequence string, starting from 'start' position (0-based inclusive) to 'end' position (0-based exclusive)."""
     return "".join(sequence[start:end])  # Ensure the result is a string
 
-def pairwise_alignment(seq1, seq2):
-    """Perform pairwise alignment between two sequences using global alignment with affine gap penalties."""
+def find_aligned_position(seq1, seq2, pos_in_seq1):
+    """Find corresponding position in seq2 for a given position in seq1 via pairwise alignment.
+
+    Args:
+        seq1: First sequence
+        seq2: Second sequence
+        pos_in_seq1: Position in seq1 (0-based)
+
+    Returns:
+        int: Corresponding position in seq2, or -1 if not found
+    """
     aligner = get_aligner()
     alignments = aligner.align(seq1, seq2)
     alignment = alignments[0]
-    return (str(alignment[0]), str(alignment[1]), alignment.score, 0, len(seq1), len(seq2))
 
-def find_pairwise_points(align, pos):
-    pos_pairwise = -1  # Default to -1 if not found
-    align_seq1, align_seq2 = align[0], align[1]
+    # Extract aligned sequences
+    align_seq1 = str(alignment[0])
+    align_seq2 = str(alignment[1])
+
+    # Find corresponding position
     align_pos1, align_pos2 = 0, 0
 
     for i in range(len(align_seq1)):
@@ -147,11 +157,10 @@ def find_pairwise_points(align, pos):
             align_pos1 += 1
         if align_seq2[i] != '-':
             align_pos2 += 1
-        if align_pos1 == pos:
-            pos_pairwise = align_pos2
-            break
+        if align_pos1 == pos_in_seq1:
+            return align_pos2
 
-    return pos_pairwise
+    return -1  # Position not found
 
 def get_unit_sequences(seq, pos, idx, copy_num):
     """Get unit sequences for alignment, returns None if invalid."""
@@ -217,11 +226,10 @@ def apply_indel_mutations(seq, generation, pos, records, indel_records, max_retr
         unit_start, unit_end, pair_start, pair_end, unit_seq, pair_seq = result
 
         try:
-            align = pairwise_alignment(unit_seq, pair_seq)
+            pair_pos = find_aligned_position(unit_seq, pair_seq, idx - unit_start)
         except IndexError:
             continue
 
-        pair_pos = find_pairwise_points(align, idx - unit_start)
         if pair_pos == -1:
             continue
 
@@ -333,13 +341,10 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
             continue
 
         try:
-            align1 = pairwise_alignment(start_unit_seq, start_pair_seq)
-            align2 = pairwise_alignment(end_unit_seq, end_pair_seq)
+            start_pair = find_aligned_position(start_unit_seq, start_pair_seq, start - start_unit_start)
+            end_pair = find_aligned_position(end_unit_seq, end_pair_seq, end - end_unit_start)
         except IndexError:
             continue
-
-        start_pair = find_pairwise_points(align1, start - start_unit_start)
-        end_pair = find_pairwise_points(align2, end - end_unit_start)
 
         if start_pair == -1 or end_pair == -1:
             continue
@@ -355,6 +360,9 @@ def apply_conversion_mutations(seq, generation, pos, records, indel_records, con
         conv_type = get_conversion_type(donor, receipt)
 
         records.append((generation, "Conversion", start_pair_abs, receipt, donor, conv_type))
+# uncomment the code below to actually apply conversions...
+#        # Apply the conversion: replace receipt sequence with donor sequence
+#        seq[start_pair_abs:end_pair_abs] = list(donor)
         count += 1
 
         if conv_type == "INDEL":
