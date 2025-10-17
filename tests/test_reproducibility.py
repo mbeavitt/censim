@@ -198,6 +198,7 @@ def test_position_consistency(test_setup):
 def test_small_simulation_performance(test_setup):
     """Test that small simulations complete within reasonable time."""
     import time
+    from censim.performance import tracker
 
     generations = 10
     seed = 42
@@ -217,6 +218,9 @@ def test_small_simulation_performance(test_setup):
     )
     duration = time.time() - start
 
+    # Record performance
+    tracker.record_benchmark("small_simulation_10gen", duration, generations, seed)
+
     # Write outputs (not timed, but needed for test completeness)
     with open(test_setup['test_dir'] / "perf_test.fa", "w") as f:
         f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
@@ -228,6 +232,7 @@ def test_small_simulation_performance(test_setup):
 def test_medium_simulation_performance(test_setup):
     """Test performance for 100 generation simulation."""
     import time
+    from censim.performance import tracker
 
     generations = 100
     seed = 42
@@ -247,6 +252,9 @@ def test_medium_simulation_performance(test_setup):
     )
     duration = time.time() - start
 
+    # Record performance
+    tracker.record_benchmark("medium_simulation_100gen", duration, generations, seed)
+
     # Write outputs
     with open(test_setup['test_dir'] / "perf_test_100.fa", "w") as f:
         f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
@@ -258,6 +266,7 @@ def test_medium_simulation_performance(test_setup):
 def test_large_simulation_performance(test_setup):
     """Test performance for 1000 generation simulation."""
     import time
+    from censim.performance import tracker
 
     generations = 1000
     seed = 42
@@ -277,6 +286,9 @@ def test_large_simulation_performance(test_setup):
     )
     duration = time.time() - start
 
+    # Record performance
+    tracker.record_benchmark("large_simulation_1000gen", duration, generations, seed)
+
     # Write outputs
     with open(test_setup['test_dir'] / "perf_test_1000.fa", "w") as f:
         f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
@@ -288,6 +300,7 @@ def test_large_simulation_performance(test_setup):
 def test_extra_large_simulation_performance(test_setup):
     """Test performance for 10,000 generation simulation."""
     import time
+    from censim.performance import tracker
 
     generations = 10000
     seed = 42
@@ -306,6 +319,9 @@ def test_extra_large_simulation_performance(test_setup):
         sequence, 0, generations, unit_data
     )
     duration = time.time() - start
+
+    # Record performance
+    tracker.record_benchmark("extra_large_simulation_10000gen", duration, generations, seed)
 
     # Write outputs
     with open(test_setup['test_dir'] / "perf_test_10000.fa", "w") as f:
