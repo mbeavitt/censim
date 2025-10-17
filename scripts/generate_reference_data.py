@@ -5,9 +5,15 @@ Run this when you're confident the simulation is working correctly
 to create "golden" reference files for future testing.
 """
 
-import subprocess
-import shutil
+import sys
+import random
+import numpy as np
 from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from censim.simulation import read_sequence, read_pos_file, introduce_mutations
 
 
 def generate_reference_files():
@@ -26,6 +32,10 @@ def generate_reference_files():
     print("Generating reference data for regression testing...")
     print("=" * 60)
 
+    # Read input files once
+    sequence = read_sequence("./data/15000copy_cen178.seq")
+    unit_data = read_pos_file("./data/15000copy_cen178.178bp.bed.pos")
+
     for seed, generations, description in test_cases:
         print(f"\nGenerating {description}: seed={seed}, generations={generations}")
 
@@ -35,28 +45,43 @@ def generate_reference_files():
         pos_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.pos"
         cenh3_ref = ref_dir / f"{description}_seed{seed}_{generations}gen.cenh3.txt"
 
-        # Run simulation
-        cmd = [
-            "python", "-m", "censim.simulation",
-            "./data/15000copy_cen178.seq", str(generations),
-            "./data/15000copy_cen178.178bp.bed.pos",
-            str(fasta_ref), str(record_ref), str(pos_ref), str(cenh3_ref),
-            "--seed", str(seed)
-        ]
-
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            if result.returncode != 0:
-                print(f"❌ Failed to generate {description}: {result.stderr}")
-                continue
+            # Set random seeds
+            random.seed(seed)
+            np.random.seed(seed)
+
+            # Run simulation
+            mutated_sequence, mutation_records, adjusted_pos, cenh3_occupancy, collapsed = introduce_mutations(
+                sequence, 0, generations, unit_data
+            )
+
+            # Write output files (no FASTA header to match old CLI behavior)
+            with open(fasta_ref, "w") as f:
+                f.write(mutated_sequence + '\n')
+
+            with open(record_ref, "w") as f:
+                for record in mutation_records:
+                    gen, mut_type, idx, ref, mut, copy_num = record
+                    f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
+
+            with open(pos_ref, "w") as f:
+                for pos in sorted(adjusted_pos):
+                    f.write(f"centro_{generations}gen\t{pos}\n")
+
+            with open(cenh3_ref, "w") as f:
+                for idx, occupied in enumerate(cenh3_occupancy):
+                    if occupied:
+                        f.write(f"{idx}\t1\n")
+                    else:
+                        f.write(f"{idx}\t0\n")
 
             print(f"✅ Generated {description}")
             print(f"   FASTA: {fasta_ref.name}")
             print(f"   Records: {record_ref.name}")
             print(f"   Positions: {pos_ref.name}")
 
-        except subprocess.TimeoutExpired:
-            print(f"❌ {description} timed out")
+        except Exception as e:
+            print(f"❌ Failed to generate {description}: {e}")
             continue
 
     # Create metadata file

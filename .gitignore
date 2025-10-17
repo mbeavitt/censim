@@ -15,3 +15,11 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Editor files
+*.swp
+*.swo
+*.swn
+*~
+.vscode/
+.idea/
