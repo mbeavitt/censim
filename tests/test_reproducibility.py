@@ -271,6 +271,39 @@ def test_extra_large_simulation_performance(test_setup):
     assert duration < 3600, f"Extra large simulation took too long: {duration:.2f}s"
 
 
+@pytest.mark.performance
+def test_massive_simulation_performance(test_setup):
+    """Test performance for 100,000 generation simulation."""
+    import time
+    from censim.performance import tracker
+
+    generations = 100000
+    seed = 42
+
+    # Set seed
+    random.seed(seed)
+    np.random.seed(seed)
+
+    # Read inputs
+    sequence = read_sequence(test_setup['input_seq'])
+
+    # Time the simulation
+    start = time.time()
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed = introduce_mutations(
+        sequence, 0, generations
+    )
+    duration = time.time() - start
+
+    # Record performance
+    tracker.record_benchmark("massive_simulation_100000gen", duration, generations, seed)
+
+    # Write outputs
+    with open(test_setup['test_dir'] / "perf_test_100000.fa", "w") as f:
+        f.write(f">centro_{generations}gen\n{mutated_sequence}\n")
+
+    assert duration < 7200, f"Massive simulation took too long: {duration:.2f}s (max: 2 hours)"
+
+
 @pytest.mark.parametrize("seed,generations", [
     (42, 50),
     (123, 100),
