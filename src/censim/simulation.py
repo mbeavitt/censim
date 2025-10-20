@@ -5,6 +5,62 @@ import re
 import pandas as pd
 
 
+class RepeatSequence:
+    """Store sequence as a list of repeat units for efficient insertions/deletions.
+
+    Instead of storing 2.67M characters, we store ~15,000 repeat units.
+    Insertions/deletions operate on units, which is ~178x faster.
+    """
+    def __init__(self, sequence, repeat_size=178):
+        self.repeat_size = repeat_size
+        # Break sequence into repeat units (bytearrays for mutability)
+        self.units = []
+        for i in range(0, len(sequence), repeat_size):
+            self.units.append(bytearray(sequence[i:i+repeat_size], 'ascii'))
+
+    def __len__(self):
+        """Return total sequence length in base pairs."""
+        return len(self.units) * self.repeat_size
+
+    def num_units(self):
+        """Return number of repeat units."""
+        return len(self.units)
+
+    def __getitem__(self, idx):
+        """Get character at position idx."""
+        unit_num = idx // self.repeat_size
+        pos_in_unit = idx % self.repeat_size
+        return chr(self.units[unit_num][pos_in_unit])
+
+    def __setitem__(self, idx, value):
+        """Set character at position idx."""
+        unit_num = idx // self.repeat_size
+        pos_in_unit = idx % self.repeat_size
+        self.units[unit_num][pos_in_unit] = ord(value)
+
+    def insert_units(self, unit_start, unit_end):
+        """Insert a copy of units[unit_start:unit_end] at position unit_start.
+
+        This is the key optimization: we copy/insert units, not individual characters.
+        """
+        units_to_insert = [bytearray(unit) for unit in self.units[unit_start:unit_end]]
+        self.units[unit_start:unit_start] = units_to_insert
+
+    def delete_units(self, unit_start, unit_end):
+        """Delete units from unit_start to unit_end.
+
+        This is the key optimization: we delete units, not individual characters.
+        """
+        del self.units[unit_start:unit_end]
+
+    def get_unit_slice_str(self, unit_start, unit_end):
+        """Get string representation of units from unit_start to unit_end."""
+        return ''.join(unit.decode('ascii') for unit in self.units[unit_start:unit_end])
+
+    def to_string(self):
+        """Convert entire sequence to string."""
+        return ''.join(unit.decode('ascii') for unit in self.units)
+
 
 def read_sequence(file_name):
     with open(file_name, "r") as file:
