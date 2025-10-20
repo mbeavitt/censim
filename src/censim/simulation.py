@@ -1,8 +1,5 @@
 import random
 import numpy as np
-import argparse
-import re
-import pandas as pd
 
 
 class RepeatSequence:
@@ -66,54 +63,6 @@ def read_sequence(file_name):
     with open(file_name, "r") as file:
         sequence = file.read().strip()
     return sequence
-
-def read_pos_file(file_path):
-    """Read and parse a BED file, returning a DataFrame containing start positions with integer type."""
-    return pd.read_csv(file_path, sep="\t", header=None, usecols=[1], names=["start"], dtype={"start": int})
-
-def adjust_pos_coordinates(pos1, pos2):
-    """Adjust pos1 coordinates based on pos2 instructions (INS/DEL)."""
-    if not pos2:
-        return pos1
-
-    # Convert to numpy array for vectorized operations
-    positions = np.array(pos1, dtype=np.int32)
-
-    for _, ins_del, p1, p2 in pos2:
-        if ins_del == "DEL":
-            # Create boolean masks for each condition
-            mask_lt_p1 = positions < p1
-            mask_between = (positions >= p1) & (positions < p2)
-            mask_gte_p2 = positions >= p2
-
-            # Apply transformations using masks
-            # Positions < p1: no change
-            # Positions between p1 and p2: remove (handled by not including them)
-            # Positions >= p2: subtract (p2 - p1)
-            new_positions = positions[mask_lt_p1 | mask_gte_p2].copy()
-            new_positions[positions[mask_lt_p1 | mask_gte_p2] >= p2] -= (p2 - p1)
-            positions = new_positions
-
-        elif ins_del == "INS":
-            # Create boolean masks
-            mask_lt_p1 = positions < p1
-            mask_between = (positions >= p1) & (positions < p2)
-            mask_gte_p2 = positions >= p2
-
-            # Calculate new positions
-            pos_lt_p1 = positions[mask_lt_p1]  # no change
-            pos_between = positions[mask_between]  # duplicate with offset
-            pos_gte_p2 = positions[mask_gte_p2] + (p2 - p1)  # shift by insertion size
-
-            # Concatenate: original + duplicated + shifted
-            positions = np.concatenate([
-                pos_lt_p1,
-                pos_between,
-                pos_between + (p2 - p1),
-                pos_gte_p2
-            ])
-
-    return positions.tolist()
 
 def apply_snp_mutations(seq, generation, records):
     """Apply SNP mutations to sequence.
@@ -188,7 +137,6 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
         # Calculate actual character positions at unit boundaries
         unit_char_start = unit_start * repeat_size
-        unit_char_end = unit_end * repeat_size
 
         # Get string representation for records
         indel_seq_str = seq.get_unit_slice_str(unit_start, unit_end)
@@ -211,8 +159,7 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
     return False  # No collapse occurred
 
-
-
+    
 def update_cenh3(cenh3_occupancy, indel_records):
     """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
     return cenh3_occupancy
