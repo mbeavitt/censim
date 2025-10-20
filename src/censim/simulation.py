@@ -137,7 +137,7 @@ def apply_snp_mutations(seq, generation, records):
         count += 1
 
 def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000):
-    """Apply INDEL mutations to sequence using whole repeats with modulo arithmetic.
+    """Apply INDEL mutations by picking random character positions, allowing bridging across unit boundaries.
 
     Args:
         seq: RepeatSequence object
@@ -155,23 +155,20 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
     consecutive_failures = 0
 
     while count < target:
-        # Get number of units - much smaller than sequence length!
-        num_units = seq.num_units()
+        # Pick a random character position across the full sequence length
+        seq_length = len(seq)
+        char_start = random.randint(0, seq_length - 1)
 
-        # Pick a random unit number
-        unit_num = random.randint(0, num_units - 1)
         indel_type = random.choice(["INS", "DEL"])
-        copy_num = np.random.poisson(7.6)
 
-        # Skip if copy_num is 0 or negative
-        if copy_num <= 0:
-            continue
+        # Sample indel size in base pairs from Poisson distribution
+        # Mean of 7.6 repeats * 178 bp/repeat ≈ 1352 bp
+        indel_size_bp = max(1, int(np.random.poisson(7.6 * repeat_size)))
 
-        # Calculate target unit (copy_num repeats away)
-        target_unit_num = unit_num + copy_num
+        char_end = char_start + indel_size_bp
 
-        # Bounds check: ensure target unit exists
-        if target_unit_num >= num_units:
+        # Bounds check: ensure end position is within sequence
+        if char_end >= seq_length:
             consecutive_failures += 1
             if consecutive_failures >= max_retries:
                 return True  # Signal array collapse
@@ -180,27 +177,36 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
         # Reset failure counter on success
         consecutive_failures = 0
 
-        # Calculate character positions for records
-        char_start = unit_num * repeat_size
-        char_target = target_unit_num * repeat_size
+        # Calculate which units are affected (may span partial units)
+        unit_start = char_start // repeat_size
+        unit_end = (char_end + repeat_size - 1) // repeat_size  # Round up to include partial unit
+
+        # Ensure we don't exceed unit bounds
+        num_units = seq.num_units()
+        if unit_end > num_units:
+            unit_end = num_units
+
+        # Calculate actual character positions at unit boundaries
+        unit_char_start = unit_start * repeat_size
+        unit_char_end = unit_end * repeat_size
 
         # Get string representation for records
-        indel_seq_str = seq.get_unit_slice_str(unit_num, target_unit_num)
+        indel_seq_str = seq.get_unit_slice_str(unit_start, unit_end)
 
         if indel_type == "INS":
-            # Insert units at unit_num position - O(num_units) not O(sequence_length)!
-            prev_base = seq[char_start - 1] if char_start > 0 else ''
+            # Insert units at unit_start position
+            prev_base = seq[unit_char_start - 1] if unit_char_start > 0 else ''
             records.append((generation, indel_type, char_start, prev_base,
-                          prev_base + indel_seq_str, copy_num))
-            seq.insert_units(unit_num, target_unit_num)
+                          prev_base + indel_seq_str, (unit_end - unit_start)))
+            seq.insert_units(unit_start, unit_end)
         else:  # DEL
-            # Delete units from unit_num to target_unit_num - O(num_units) not O(sequence_length)!
-            prev_base = seq[char_start - 1] if char_start > 0 else ''
+            # Delete units from unit_start to unit_end
+            prev_base = seq[unit_char_start - 1] if unit_char_start > 0 else ''
             records.append((generation, indel_type, char_start, indel_seq_str,
-                          prev_base, copy_num))
-            seq.delete_units(unit_num, target_unit_num)
+                          prev_base, (unit_end - unit_start)))
+            seq.delete_units(unit_start, unit_end)
 
-        indel_records.append((generation, indel_type, char_start, char_target))
+        indel_records.append((generation, indel_type, char_start, char_end))
         count += 1
 
     return False  # No collapse occurred
