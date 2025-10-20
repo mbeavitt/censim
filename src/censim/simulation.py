@@ -116,7 +116,13 @@ def adjust_pos_coordinates(pos1, pos2):
     return positions.tolist()
 
 def apply_snp_mutations(seq, generation, records):
-    """Apply SNP mutations to sequence."""
+    """Apply SNP mutations to sequence.
+
+    Args:
+        seq: RepeatSequence object
+        generation: Current generation number
+        records: Mutation records list
+    """
     count = 0
     target = np.random.poisson(0.1)
     bases = ['A', 'T', 'C', 'G']
@@ -134,7 +140,7 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
     """Apply INDEL mutations to sequence using whole repeats with modulo arithmetic.
 
     Args:
-        seq: Sequence as list
+        seq: RepeatSequence object
         generation: Current generation number
         records: Mutation records list
         indel_records: INDEL coordinate adjustment records
@@ -149,8 +155,8 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
     consecutive_failures = 0
 
     while count < target:
-        # Recalculate number of units based on current sequence length
-        num_units = len(seq) // repeat_size
+        # Get number of units - much smaller than sequence length!
+        num_units = seq.num_units()
 
         # Pick a random unit number
         unit_num = random.randint(0, num_units - 1)
@@ -174,25 +180,27 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
         # Reset failure counter on success
         consecutive_failures = 0
 
-        # Calculate boundaries using modulo arithmetic (whole repeats only)
-        unit_start = unit_num * repeat_size
-        target_start = target_unit_num * repeat_size
+        # Calculate character positions for records
+        char_start = unit_num * repeat_size
+        char_target = target_unit_num * repeat_size
 
-        # Extract the sequence between the two repeat boundaries
-        indel_seq = "".join(seq[unit_start:target_start])
+        # Get string representation for records
+        indel_seq_str = seq.get_unit_slice_str(unit_num, target_unit_num)
 
         if indel_type == "INS":
-            # Insert the sequence at unit_start
-            records.append((generation, indel_type, unit_start, seq[unit_start - 1] if unit_start > 0 else '',
-                          seq[unit_start - 1] if unit_start > 0 else '' + indel_seq, copy_num))
-            seq[unit_start:unit_start] = list(indel_seq)
+            # Insert units at unit_num position - O(num_units) not O(sequence_length)!
+            prev_base = seq[char_start - 1] if char_start > 0 else ''
+            records.append((generation, indel_type, char_start, prev_base,
+                          prev_base + indel_seq_str, copy_num))
+            seq.insert_units(unit_num, target_unit_num)
         else:  # DEL
-            # Delete the sequence from unit_start to target_start
-            records.append((generation, indel_type, unit_start, indel_seq,
-                          seq[unit_start - 1] if unit_start > 0 else '', copy_num))
-            del seq[unit_start:target_start]
+            # Delete units from unit_num to target_unit_num - O(num_units) not O(sequence_length)!
+            prev_base = seq[char_start - 1] if char_start > 0 else ''
+            records.append((generation, indel_type, char_start, indel_seq_str,
+                          prev_base, copy_num))
+            seq.delete_units(unit_num, target_unit_num)
 
-        indel_records.append((generation, indel_type, unit_start, target_start))
+        indel_records.append((generation, indel_type, char_start, char_target))
         count += 1
 
     return False  # No collapse occurred
@@ -235,7 +243,8 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
         tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed)
             where collapsed is True if the array collapsed to zero, False otherwise
     """
-    seq = list(sequence)
+    # Use RepeatSequence for ~178x faster insertions/deletions
+    seq = RepeatSequence(sequence, repeat_size)
     records = []
 
     # Initialize CENH3 occupancy based on initial sequence length
@@ -254,5 +263,5 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
             print("Simulation complete: Array collapsed to zero")
             break
 
-    return "".join(seq), records, cenh3_occupancy, collapsed
+    return seq.to_string(), records, cenh3_occupancy, collapsed
 
