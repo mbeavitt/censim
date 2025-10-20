@@ -18,7 +18,8 @@ from correlation_dimension import (
 
 
 def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
-                            generation=None, output_file='./output/matrix_with_heatmap.png'):
+                            generation=None, output_file='./output/matrix_with_heatmap.png',
+                            image_format='jpeg', jpeg_quality=85):
     """
     Create a combined plot with rotated distance matrix on top and correlation heatmap below.
 
@@ -30,6 +31,8 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
         window_size: window size used
         generation: generation number to display (optional)
         output_file: output filename
+        image_format: output format - 'png', 'jpeg', or 'webp' (default: 'jpeg')
+        jpeg_quality: JPEG quality 1-100 (default: 85)
     """
     n = D.shape[0]
 
@@ -90,10 +93,23 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
 #    cbar2 = plt.colorbar(im2, ax=ax_heatmap)
 #    cbar2.set_label('Mean C_i(r)', fontsize=11)
 
-    plt.tight_layout()
-    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.tight_layout(pad=0.5)
+    # Use fixed bbox instead of 'tight' to ensure consistent image dimensions
+    save_kwargs = {'dpi': 150, 'bbox_inches': None}
+
+    if image_format.lower() in ['jpg', 'jpeg']:
+        save_kwargs['format'] = 'jpeg'
+        # matplotlib uses 'pil_kwargs' to pass quality to PIL
+        save_kwargs['pil_kwargs'] = {'quality': jpeg_quality, 'optimize': True}
+    elif image_format.lower() == 'webp':
+        save_kwargs['format'] = 'webp'
+        save_kwargs['pil_kwargs'] = {'quality': jpeg_quality}
+    else:  # png
+        save_kwargs['format'] = 'png'
+
+    plt.savefig(output_file, **save_kwargs)
     plt.close()
-    print(f"Combined matrix + heatmap saved as {output_file}")
+    print(f"Combined matrix + heatmap saved as {output_file} ({image_format.upper()})")
 
 
 def main():
@@ -142,6 +158,20 @@ def main():
         type=int,
         default=20,
         help='Number of radii to use in range [r-min, r-max] (default: 20)'
+    )
+
+    parser.add_argument(
+        '--format',
+        choices=['png', 'jpeg', 'jpg', 'webp'],
+        default='jpeg',
+        help='Output image format (default: jpeg)'
+    )
+
+    parser.add_argument(
+        '--quality',
+        type=int,
+        default=85,
+        help='JPEG/WebP quality 1-100 (default: 85, higher = better quality)'
     )
 
     args = parser.parse_args()
@@ -193,14 +223,22 @@ def main():
     print("\nCreating combined matrix + heatmap plot...")
     # Extract filename stem from data file for output naming
     data_stem = Path(args.data_file).stem  # e.g., "2191000generation.out"
-    output_file = output_dir / f"{data_stem}_matrix_heatmap.png"
+
+    # Determine file extension based on format
+    fmt = args.format.lower()
+    if fmt == 'jpg':
+        fmt = 'jpeg'
+    ext = 'jpg' if fmt == 'jpeg' else fmt
+
+    output_file = output_dir / f"{data_stem}_matrix_heatmap.{ext}"
 
     # Extract generation number from filename
     generation_match = re.search(r'(\d+)generation', data_stem)
     generation = int(generation_match.group(1)) if generation_match else None
 
     plot_matrix_and_heatmap(D, positions, mean_corr, r_values, args.window_size,
-                           generation=generation, output_file=str(output_file))
+                           generation=generation, output_file=str(output_file),
+                           image_format=fmt, jpeg_quality=args.quality)
 
     print("\n" + "=" * 70)
     print("COMPLETE")
