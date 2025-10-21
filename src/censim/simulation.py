@@ -105,15 +105,12 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
     while count < target:
         # Pick a random character position across the full sequence length
-        seq_length = len(seq)
-        char_start = random.randint(0, seq_length - 1)
+        char_start = random.randint(0, len(seq) - 1)
 
         indel_type = random.choice(["INS", "DEL"])
 
         # Sample indel size in base pairs from Poisson distribution
-        # Mean of 7.6 repeats * 178 bp/repeat ≈ 1352 bp
-        indel_size_bp = max(1, int(np.random.poisson(7.6 * repeat_size)))
-
+        indel_size_bp = max(1, int(np.random.poisson(7.6) * repeat_size))
         char_end = char_start + indel_size_bp
 
         # Bounds check: ensure end position is within sequence
