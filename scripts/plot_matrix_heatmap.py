@@ -213,7 +213,7 @@ def main():
     print(f"Selected {len(r_values)} radii")
 
     # Compute sliding window
-    print(f"\nComputing sliding window local correlation...")
+    print("\nComputing sliding window local correlation...")
     positions, mean_corr, max_corr = sliding_window_local_correlation(
         D, args.window_size, r_values
     )
