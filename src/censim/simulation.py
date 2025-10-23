@@ -53,10 +53,6 @@ class RepeatSequence:
     def delete_at_position(self, char_start, char_end):
         """Delete sequence from char_start to char_end at arbitrary positions.
 
-        Example: Delete from A[50] to E[50] across units A,B,C,D,E
-        - Takes A[0:50] and E[50:178], merges them into modified A
-        - Deletes units B, C, D, E
-
         Args:
             char_start: Starting character position (inclusive)
             char_end: Ending character position (exclusive)
@@ -64,73 +60,32 @@ class RepeatSequence:
         Raises:
             ValueError: If deletion size is not a multiple of repeat_size
         """
-        deletion_size = char_end - char_start
-        if deletion_size % self.repeat_size != 0:
+        if (char_end - char_start) % self.repeat_size != 0:
             raise ValueError(
                 f"Deletion size must be a multiple of {self.repeat_size}bp to maintain frame alignment. "
-                f"Got {deletion_size}bp (char_start={char_start}, char_end={char_end})"
+                f"Got {char_end - char_start}bp (char_start={char_start}, char_end={char_end})"
             )
 
         unit_start = char_start // self.repeat_size
-        unit_end = (char_end + self.repeat_size - 1) // self.repeat_size
+        unit_end = char_end // self.repeat_size
+        pos_start = char_start % self.repeat_size
+        pos_end = char_end % self.repeat_size
 
-        pos_start_in_first = char_start % self.repeat_size
-        pos_end_in_last = char_end % self.repeat_size
-
-        # Special case: deletion aligns perfectly to unit boundaries
-        if pos_start_in_first == 0 and pos_end_in_last == 0:
-            # Delete complete units from unit_start to unit_end-1
+        # If deletion aligns to unit boundaries, just delete the units
+        if pos_start == 0 and pos_end == 0:
             del self.units[unit_start:unit_end]
             return
 
-        # Handle single unit case
-        if unit_start == unit_end - 1:
-            # Deletion within one unit - merge before and after
-            before = self.units[unit_start][:pos_start_in_first]
-            after = self.units[unit_start][pos_end_in_last:]
-            merged = before + after
-            if len(merged) != self.repeat_size:
-                raise RuntimeError(
-                    f"Generated partial unit of size {len(merged)} during single-unit deletion. "
-                    f"This indicates a bug in the deletion logic."
-                )
-            self.units[unit_start] = merged
-            return
+        # Merge partial units: keep start of first unit + end of last unit
+        before = self.units[unit_start][:pos_start]
+        after = self.units[unit_end][pos_end:] if pos_end > 0 else bytearray()
+        self.units[unit_start] = before + after
 
-        # Multi-unit deletion: merge first and last units
-        # Take beginning of first unit and end of last unit
-        before = self.units[unit_start][:pos_start_in_first]
-
-        if pos_end_in_last > 0:
-            after = self.units[unit_end - 1][pos_end_in_last:]
-        else:
-            # If pos_end_in_last is 0, we take nothing from the last unit
-            # (delete ended exactly at unit boundary)
-            after = bytearray()
-            unit_end -= 1  # Adjust to not delete an extra unit
-
-        # Merge and replace first unit
-        merged = before + after
-        if len(merged) != self.repeat_size:
-            raise RuntimeError(
-                f"Generated partial unit of size {len(merged)} during multi-unit deletion. "
-                f"This indicates a bug in the deletion logic. "
-                f"before={len(before)}, after={len(after)}, deletion_size={deletion_size}"
-            )
-        self.units[unit_start] = merged
-
-        # Delete all intermediate units (including the last partial unit)
-        if unit_end > unit_start + 1:
-            del self.units[unit_start + 1:unit_end]
+        # Delete remaining units (everything from unit_start+1 to unit_end inclusive)
+        del self.units[unit_start + 1:unit_end + 1]
 
     def duplicate_at_position(self, char_start, char_end):
         """Duplicate sequence from char_start to char_end as a tandem duplication.
-
-        Example: Duplicate A[50] to B[50] across units A, B, C
-        - A[50] onwards is A2, A[0:50] is A1
-        - B[50] onwards is B2, B[0:50] is B1
-        - Result: A1 A2 B1 [A2 B1] B2 C (bracketed = duplicated segment)
-        - Maintains 178bp frame alignment
 
         Args:
             char_start: Starting character position (inclusive)
@@ -139,83 +94,36 @@ class RepeatSequence:
         Raises:
             ValueError: If duplication size is not a multiple of repeat_size
         """
-        duplication_size = char_end - char_start
-        if duplication_size % self.repeat_size != 0:
+        if (char_end - char_start) % self.repeat_size != 0:
             raise ValueError(
                 f"Duplication size must be a multiple of {self.repeat_size}bp to maintain frame alignment. "
-                f"Got {duplication_size}bp (char_start={char_start}, char_end={char_end})"
+                f"Got {char_end - char_start}bp (char_start={char_start}, char_end={char_end})"
             )
 
+        # Extract the segment to duplicate as bytes directly (avoiding string conversion)
         unit_start = char_start // self.repeat_size
         unit_end = (char_end + self.repeat_size - 1) // self.repeat_size
+        pos_start = char_start % self.repeat_size
+        pos_end = char_end % self.repeat_size
 
-        pos_start_in_first = char_start % self.repeat_size
-        pos_end_in_last = char_end % self.repeat_size
-
-        # Build the duplicated segment
-        duplicated_units = []
-
-        # Handle single unit case
-        if unit_start == unit_end - 1:
-            # Duplication within one unit
-            # Split into: before | dup_segment | dup_segment | after
-            before = self.units[unit_start][:pos_start_in_first]
-            dup_segment = self.units[unit_start][pos_start_in_first:pos_end_in_last]
-            after = self.units[unit_start][pos_end_in_last:]
-
-            # Create new unit(s) maintaining frame
-            # Original: before + dup_segment + after
-            # Result: before + dup_segment + dup_segment + after
-            self.units[unit_start] = before + dup_segment + dup_segment + after
-            return
-
-        # Multi-unit duplication
-        # First unit: A1 + A2 (split at char_start)
-        first_before = self.units[unit_start][:pos_start_in_first]  # A1
-        first_after = self.units[unit_start][pos_start_in_first:]    # A2
-
-        # Last unit: B1 + B2 (split at char_end)
-        if pos_end_in_last > 0:
-            last_before = self.units[unit_end - 1][:pos_end_in_last]    # B1
-            last_after = self.units[unit_end - 1][pos_end_in_last:]     # B2
-        else:
-            # char_end is at exact unit boundary
-            last_before = self.units[unit_end - 1][:]
-            last_after = bytearray()
-            # Don't need to adjust unit_end since we're including the full last unit
-
-        # Build duplicated segment: A2 + middle_units + B1
-        dup_segment = bytearray(first_after)  # A2
-
-        # Add all complete middle units
+        # Build duplicated segment by extracting bytes directly
+        dup_segment = bytearray()
+        dup_segment.extend(self.units[unit_start][pos_start:])
         for i in range(unit_start + 1, unit_end - 1):
             dup_segment.extend(self.units[i])
+        if pos_end > 0:
+            dup_segment.extend(self.units[unit_end - 1][:pos_end])
+        else:
+            dup_segment.extend(self.units[unit_end - 1])
 
-        dup_segment.extend(last_before)  # B1
+        # Build new sequence: before + dup_segment + dup_segment + after
+        before = self.units[unit_start][:pos_start]
+        after = self.units[unit_end - 1][pos_end:] if pos_end > 0 else bytearray()
+        new_sequence = before + dup_segment + dup_segment + after
 
-        # Now reconstruct the sequence
-        # Original structure: A1|A2 [middle units] B1|B2 [remaining]
-        # New structure: A1 A2 B1 [A2 middle B1] B2 [remaining]
-
-        # Build new units maintaining 178bp frame
-        new_sequence = first_before + dup_segment + dup_segment + last_after
-
-        # Split new_sequence into 178bp units
-        new_units = []
-        for i in range(0, len(new_sequence), self.repeat_size):
-            unit = bytearray(new_sequence[i:i+self.repeat_size])
-            # Ensure all units are exactly repeat_size (pad if last unit is short)
-            if len(unit) < self.repeat_size:
-                # This should never happen if duplication_size is a multiple of repeat_size
-                raise RuntimeError(
-                    f"Generated partial unit of size {len(unit)} during duplication. "
-                    f"This indicates a bug in the duplication logic."
-                )
-            new_units.append(unit)
-
-        # Replace affected units
-        # Delete old units and insert new ones
-        num_old_units = unit_end - unit_start
+        # Split into repeat_size units and replace
+        new_units = [bytearray(new_sequence[i:i+self.repeat_size])
+                     for i in range(0, len(new_sequence), self.repeat_size)]
         self.units[unit_start:unit_end] = new_units
 
     def get_unit_slice_str(self, unit_start, unit_end):
@@ -234,27 +142,24 @@ class RepeatSequence:
         """
         unit_start = char_start // self.repeat_size
         unit_end = (char_end + self.repeat_size - 1) // self.repeat_size
+        pos_start = char_start % self.repeat_size
+        pos_end = char_end % self.repeat_size
 
-        pos_start_in_first = char_start % self.repeat_size
-        pos_end_in_last = char_end % self.repeat_size
-
+        # Single unit case
         if unit_start == unit_end - 1:
-            # All within one unit
-            return self.units[unit_start][pos_start_in_first:pos_end_in_last].decode('ascii')
+            return self.units[unit_start][pos_start:pos_end].decode('ascii')
 
-        # Build string from multiple units
-        result = []
-        result.append(self.units[unit_start][pos_start_in_first:].decode('ascii'))
-
+        # Multi-unit case: extract bytes from affected units
+        result = bytearray()
+        result.extend(self.units[unit_start][pos_start:])
         for i in range(unit_start + 1, unit_end - 1):
-            result.append(self.units[i].decode('ascii'))
-
-        if pos_end_in_last > 0:
-            result.append(self.units[unit_end - 1][:pos_end_in_last].decode('ascii'))
+            result.extend(self.units[i])
+        if pos_end > 0:
+            result.extend(self.units[unit_end - 1][:pos_end])
         else:
-            result.append(self.units[unit_end - 1].decode('ascii'))
+            result.extend(self.units[unit_end - 1])
 
-        return ''.join(result)
+        return result.decode('ascii')
 
     def to_string(self):
         """Convert entire sequence to string."""
