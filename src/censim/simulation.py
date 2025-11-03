@@ -4,7 +4,7 @@ from .identity import all_vs_all_identity_scipy
 from .correlation_dimension import (
     hamming_distance_matrix,
     sliding_window_local_correlation,
-    estimate_D2_from_C_r
+    estimate_D2_from_C_r_batch
 )
 
 class RepeatSequence:
@@ -315,16 +315,14 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     r_values = np.linspace(r_min, r_max, n_radii)
 
     # Compute sliding window local correlation
-    positions, mean_corr, max_corr = sliding_window_local_correlation(
+    positions, mean_corr = sliding_window_local_correlation(
         D, window_size, r_values
     )
 
-    # Compute D2 values at each window position
-    d_values = []
-    for i in range(len(positions)):
-        slope, intercept, mask = estimate_D2_from_C_r(r_values, mean_corr[i, :])
-        d_values.append(slope if not np.isnan(slope) else 0.0)
-    d_values = np.array(d_values)
+    # Compute D2 values at each window position using vectorized batch processing
+    # Pre-compute log(r_values) once for performance
+    log_r_values = np.log(r_values)
+    d_values = estimate_D2_from_C_r_batch(r_values, mean_corr, log_r=log_r_values)
 
     return d_values
 
@@ -364,8 +362,6 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
         # Compute correlation dimension
         d_values = compute_correlation_dimension(seq, repeat_len=repeat_size)
         d_values_history.append(d_values)
-
-        print(f"Finished generation {gen}")
 
         if collapsed:
             print("Simulation complete: Array collapsed to zero")

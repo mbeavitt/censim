@@ -84,9 +84,9 @@ def test_d_values_regression(evolved_sequence):
     it indicates that the correlation dimension calculation has changed.
     """
     # Reference hash computed from a known good run
-    # This hash was generated on: 2025-11-03 (with vectorized optimization)
+    # This hash was generated on: 2025-11-03 (with vectorized batch estimate_D2_from_C_r_batch)
     # Update this hash if you intentionally change the d_values computation
-    REFERENCE_HASH = "5ac0177459aba45ef00a9a2162c2376b56214e762a28e983a41ba8fa435cf8f3"
+    REFERENCE_HASH = "c808b5a2fd45f8ef83a47d05b0198fe5c401ddc93131fc308344f4514b8d5916"
 
     # Compute d_values on the evolved sequence
     d_values = compute_correlation_dimension(evolved_sequence, repeat_len=178)

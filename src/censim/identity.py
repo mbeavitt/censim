@@ -35,7 +35,11 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
 
     if subsample_every == 1:
         # Exact computation
-        seq_array = np.array([[ord(c) for c in seq] for seq in repeats], dtype=np.uint8)
+        # Faster string-to-array conversion using numpy's vectorized operations
+        seq_len = len(repeats[0])
+        seq_array = np.empty((n_repeats, seq_len), dtype=np.uint8)
+        for i, seq in enumerate(repeats):
+            seq_array[i] = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)
         distances = pdist(seq_array, metric='hamming')
         identity_matrix = 1 - squareform(distances)
     else:
@@ -43,7 +47,11 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
         subset_indices = np.arange(0, n_repeats, subsample_every)
         subset_repeats = [repeats[i] for i in subset_indices]
 
-        seq_array = np.array([[ord(c) for c in seq] for seq in subset_repeats], dtype=np.uint8)
+        # Faster string-to-array conversion using numpy's vectorized operations
+        seq_len = len(subset_repeats[0])
+        seq_array = np.empty((len(subset_repeats), seq_len), dtype=np.uint8)
+        for i, seq in enumerate(subset_repeats):
+            seq_array[i] = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)
         distances = pdist(seq_array, metric='hamming')
         identity_matrix = 1 - squareform(distances)
 

@@ -233,7 +233,7 @@ def main():
 
     # Compute sliding window
     print("\nComputing sliding window local correlation...")
-    positions, mean_corr, max_corr = sliding_window_local_correlation(
+    positions, mean_corr = sliding_window_local_correlation(
         D, args.window_size, r_values
     )
     print(f"Computed {len(positions)} windows")
