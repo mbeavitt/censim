@@ -14,14 +14,15 @@ from identity import all_vs_all_identity_scipy
 from correlation_dimension import (
     hamming_distance_matrix,
     sliding_window_local_correlation,
+    estimate_D2_from_C_r,
 )
 
 
 def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
-                            generation=None, output_file='./output/matrix_with_heatmap.png',
+                            d_values=None, generation=None, output_file='./output/matrix_with_heatmap.png',
                             image_format='jpeg', jpeg_quality=85):
     """
-    Create a combined plot with rotated distance matrix on top and correlation heatmap below.
+    Create a combined plot with rotated distance matrix on top, correlation heatmap in middle, and D2 plot below.
 
     Args:
         D: distance matrix
@@ -29,6 +30,7 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
         mean_corr: (n_windows, n_radii) array of mean correlation values
         r_values: array of radii used
         window_size: window size used
+        d_values: array of correlation dimension (D2) values at each position (optional)
         generation: generation number to display (optional)
         output_file: output filename
         image_format: output format - 'png', 'jpeg', or 'webp' (default: 'jpeg')
@@ -44,9 +46,13 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
 
     rotated = rotate(masked_matrix, 45, reshape=True, order=0, cval=np.nan)
 
-    # Create figure with 2 subplots: matrix on top, heatmap on bottom
-    fig, (ax_matrix, ax_heatmap) = plt.subplots(2, 1, figsize=(16, 10),
-                                                 gridspec_kw={'height_ratios': [2, 1]})
+    # Create figure with 3 subplots if d_values provided, else 2
+    if d_values is not None:
+        fig, (ax_matrix, ax_heatmap, ax_d) = plt.subplots(3, 1, figsize=(16, 12),
+                                                            gridspec_kw={'height_ratios': [2, 1, 0.8]})
+    else:
+        fig, (ax_matrix, ax_heatmap) = plt.subplots(2, 1, figsize=(16, 10),
+                                                     gridspec_kw={'height_ratios': [2, 1]})
 
     # Top: rotated matrix with viridis
     im1 = ax_matrix.imshow(rotated, cmap='viridis', interpolation='nearest', aspect='auto',
@@ -92,6 +98,19 @@ def plot_matrix_and_heatmap(D, positions, mean_corr, r_values, window_size,
 #    # Add colorbar for heatmap
 #    cbar2 = plt.colorbar(im2, ax=ax_heatmap)
 #    cbar2.set_label('Mean C_i(r)', fontsize=11)
+
+    # Bottom: D2 values plot (if provided)
+    if d_values is not None:
+        ax_d.plot(positions, d_values, 'b-', linewidth=1.5)
+        ax_d.set_xlabel('Position (sequence index)', fontsize=11, fontweight='bold')
+        ax_d.set_ylabel('D₂', fontsize=11, fontweight='bold')
+        ax_d.set_title('Correlation Dimension (D₂) Along Sequence', fontsize=12, fontweight='bold')
+        ax_d.grid(True, alpha=0.3)
+        ax_d.set_xlim(0, n)
+
+        # Add horizontal line at D2=1 for reference
+        ax_d.axhline(y=1.0, color='r', linestyle='--', alpha=0.5, label='D₂ = 1')
+        ax_d.legend(loc='upper right')
 
     plt.tight_layout(pad=0.5)
     # Use fixed bbox instead of 'tight' to ensure consistent image dimensions
@@ -219,8 +238,19 @@ def main():
     )
     print(f"Computed {len(positions)} windows")
 
+    # Compute D2 values at each window position
+    print("\nComputing correlation dimension (D2) at each position...")
+    d_values = []
+    for i, pos in enumerate(positions):
+        # Fit D2 from the correlation values at this position
+        slope, intercept, mask = estimate_D2_from_C_r(r_values, mean_corr[i, :])
+        d_values.append(slope if not np.isnan(slope) else 0.0)
+    d_values = np.array(d_values)
+    print(f"D2 range: [{np.min(d_values):.3f}, {np.max(d_values):.3f}]")
+    print(f"D2 mean: {np.mean(d_values):.3f} ± {np.std(d_values):.3f}")
+
     # Create combined plot
-    print("\nCreating combined matrix + heatmap plot...")
+    print("\nCreating combined matrix + heatmap + D2 plot...")
     # Extract filename stem from data file for output naming
     data_stem = Path(args.data_file).stem  # e.g., "2191000generation.out"
 
@@ -237,7 +267,7 @@ def main():
     generation = int(generation_match.group(1)) if generation_match else None
 
     plot_matrix_and_heatmap(D, positions, mean_corr, r_values, args.window_size,
-                           generation=generation, output_file=str(output_file),
+                           d_values=d_values, generation=generation, output_file=str(output_file),
                            image_format=fmt, jpeg_quality=args.quality)
 
     print("\n" + "=" * 70)
