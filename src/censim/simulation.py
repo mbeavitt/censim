@@ -1,6 +1,11 @@
 import random
 import numpy as np
-
+from .identity import all_vs_all_identity_scipy
+from .correlation_dimension import (
+    hamming_distance_matrix,
+    sliding_window_local_correlation,
+    estimate_D2_from_C_r
+)
 
 class RepeatSequence:
     """Store sequence as a list of repeat units for efficient insertions/deletions.
@@ -255,7 +260,7 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
     return False  # No collapse occurred
 
-    
+
 def update_cenh3(cenh3_occupancy, indel_records):
     """Update CENH3 occupancy array based on INDEL records. Currently a placeholder."""
     return cenh3_occupancy
@@ -279,6 +284,51 @@ def initialize_cenh3_occupancy(num_units):
 
     return cenh3_occupancy
 
+def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_radii=50, window_size=100):
+    """Compute correlation dimension (D2) values from a RepeatSequence object.
+
+    Args:
+        seq: RepeatSequence object
+        repeat_len: Length of each repeat unit (default: 178)
+        r_min: Minimum radius value (default: 0.01)
+        r_max: Maximum radius value (default: 0.5)
+        n_radii: Number of radius values (default: 50)
+        window_size: Sliding window size (default: 100)
+
+    Returns:
+        np.array: D2 values at each window position
+    """
+    # Convert RepeatSequence to string
+    mutated_sequence = seq.to_string()
+
+    # Parse sequence into repeats
+    n_repeats = len(mutated_sequence) // repeat_len
+    repeats = [mutated_sequence[i*repeat_len:(i+1)*repeat_len] for i in range(n_repeats)]
+
+    # Compute identity matrix with subsampling
+    identity_matrix = all_vs_all_identity_scipy(repeats, scale_factor=30, max_exact_size=1000)
+
+    # Convert to distance matrix
+    D = hamming_distance_matrix(identity_matrix)
+
+    # Choose radii
+    r_values = np.linspace(r_min, r_max, n_radii)
+
+    # Compute sliding window local correlation
+    positions, mean_corr, max_corr = sliding_window_local_correlation(
+        D, window_size, r_values
+    )
+
+    # Compute D2 values at each window position
+    d_values = []
+    for i in range(len(positions)):
+        slope, intercept, mask = estimate_D2_from_C_r(r_values, mean_corr[i, :])
+        d_values.append(slope if not np.isnan(slope) else 0.0)
+    d_values = np.array(d_values)
+
+    return d_values
+
+
 def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
     """Introduce mutations into sequence over multiple generations.
 
@@ -289,28 +339,37 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
         repeat_size: Size of each repeat unit in bp (default: 178)
 
     Returns:
-        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed)
+        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history)
             where collapsed is True if the array collapsed to zero, False otherwise
+            d_values_history is a list of d_values arrays for each generation
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
     records = []
+    d_values_history = []
 
     # Initialize CENH3 occupancy based on initial sequence length
     num_units = len(sequence) // repeat_size
     cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
     collapsed = False
-    for _ in range(num_generations):
+    for gen in range(num_generations):
         generation += 1
 
         apply_snp_mutations(seq, generation, records)
 
         # Check if array collapsed during INDEL mutations
         collapsed = apply_indel_mutations(seq, generation, records, [], repeat_size)
+
+        # Compute correlation dimension
+        d_values = compute_correlation_dimension(seq, repeat_len=repeat_size)
+        d_values_history.append(d_values)
+
+        print(f"Finished generation {gen}")
+
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
 
-    return seq.to_string(), records, cenh3_occupancy, collapsed
+    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history
 
