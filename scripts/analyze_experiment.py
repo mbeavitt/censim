@@ -23,10 +23,15 @@ def load_evolved_repeats(fa_file, repeat_length=178):
     with open(fa_file) as f:
         sequence = f.read().strip()
 
+    #print(f"    DEBUG: Total sequence length = {len(sequence)} bp")
+
     repeats = []
     for i in range(0, len(sequence), repeat_length):
         if i + repeat_length <= len(sequence):
             repeats.append(sequence[i:i+repeat_length])
+
+    #print(f"    DEBUG: Number of repeats extracted = {len(repeats)}")
+    #print(f"    DEBUG: Expected centromere length (repeats * repeat_length) = {len(repeats) * repeat_length} bp")
 
     return repeats
 
@@ -46,12 +51,18 @@ def calculate_windowed_average(distances, window_size=100):
     windowed_distances = []
     windowed_positions = []
 
+    #print(f"    DEBUG: n_repeats = {n_repeats}")
+    #print(f"    DEBUG: window_size = {window_size}")
+
     for i in range(0, n_repeats, window_size):
         window_end = min(i + window_size, n_repeats)
         window_avg = np.mean(distances[i:window_end])
         window_center = (i + window_end) / 2
         windowed_distances.append(window_avg)
         windowed_positions.append(window_center / n_repeats)
+
+    #print(f"    DEBUG: number of windows = {len(windowed_positions)}")
+    #print(f"    DEBUG: position range = {windowed_positions[0]:.4f} to {windowed_positions[-1]:.4f}")
 
     return np.array(windowed_positions), np.array(windowed_distances)
 
@@ -78,16 +89,23 @@ def plot_generation_level(generation, all_positions, all_distances, output_file)
     """Plot edit distance for a specific generation level across all runs."""
 
     # Calculate mean and std across all runs
-    # First, ensure all runs have the same number of windows
-    min_length = min(len(pos) for pos in all_positions)
+    # Interpolate all runs to a common grid from 0 to 1
+    n_grid_points = 200  # Number of points in the interpolated grid
+    common_positions = np.linspace(0, 1, n_grid_points)
 
-    # Truncate all to the same length
-    positions_aligned = [pos[:min_length] for pos in all_positions]
-    distances_aligned = [dist[:min_length] for dist in all_distances]
+    #print(f"  DEBUG: Interpolating {len(all_positions)} runs to {n_grid_points} common grid points")
+
+    interpolated_distances = []
+    for positions, distances in zip(all_positions, all_distances):
+        # Interpolate this run's data to the common grid
+        interpolated = np.interp(common_positions, positions, distances)
+        interpolated_distances.append(interpolated)
 
     # Stack into arrays
-    positions = np.array(positions_aligned[0])  # All should be the same
-    distances_matrix = np.array(distances_aligned)  # Shape: (n_runs, n_windows)
+    positions = common_positions
+    distances_matrix = np.array(interpolated_distances)  # Shape: (n_runs, n_grid_points)
+
+    #print(f"  DEBUG: Final matrix shape: {distances_matrix.shape}")
 
     # Calculate statistics
     mean_distances = np.mean(distances_matrix, axis=0)
