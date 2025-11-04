@@ -10,8 +10,8 @@ from scipy.ndimage import rotate
 from pathlib import Path
 import re
 
-from identity import all_vs_all_identity_scipy
-from correlation_dimension import (
+from censim.identity import all_vs_all_identity_scipy
+from censim.correlation_dimension import (
     hamming_distance_matrix,
     sliding_window_local_correlation,
     estimate_D2_from_C_r,
