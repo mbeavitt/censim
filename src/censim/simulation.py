@@ -197,7 +197,57 @@ def apply_snp_mutations(seq, generation, records):
         seq[idx] = new_base
         count += 1
 
-def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000):
+def d_values_to_position_weights(d_values, seq_length, repeat_size=178, window_size=100, scale_factor=30):
+    """Convert D2 values (per window) to position weights (per base pair).
+
+    Args:
+        d_values: Array of D2 values at each window position (computed on subsampled repeats)
+        seq_length: Length of sequence in base pairs
+        repeat_size: Size of each repeat unit (default: 178)
+        window_size: Window size used for D2 calculation (default: 100)
+        scale_factor: Subsampling scale factor used in identity matrix computation (default: 30)
+
+    Returns:
+        weights: Array of weights for each base position (normalized to sum to 1)
+    """
+    if d_values is None or len(d_values) == 0:
+        # Uniform weights if no D2 values
+        return np.ones(seq_length) / seq_length
+
+    num_repeats = seq_length // repeat_size
+
+    # Calculate the subsampling factor
+    import math
+    subsample_every = max(1, int(math.sqrt(num_repeats / scale_factor)))
+
+    # Number of subsampled repeats
+    num_subsampled = (num_repeats + subsample_every - 1) // subsample_every
+
+    # Each d_value corresponds to a window center position in SUBSAMPLED repeat units
+    # Window positions are 0, 1, 2, ... len(d_values)-1 in subsampled space
+    window_positions_subsampled = np.arange(len(d_values))
+
+    # Map back to original repeat unit indices
+    # Each subsampled index corresponds to (index * subsample_every) in original space
+    window_positions_repeats = window_positions_subsampled * subsample_every
+
+    # Map to base pair positions
+    bp_window_positions = window_positions_repeats * repeat_size
+
+    # Interpolate d_values to all base positions
+    bp_positions = np.arange(seq_length)
+
+    # Use linear interpolation, extrapolate at edges
+    weights = np.interp(bp_positions, bp_window_positions, d_values)
+
+    # Ensure non-negative and normalize
+    weights = np.maximum(weights, 0.01)  # Small minimum to avoid zero probability
+    weights = weights / np.sum(weights)
+
+    return weights
+
+
+def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000, d_values=None, d2_bias_strength=1.0):
     """Apply INDEL mutations (tandem duplications/deletions) at arbitrary character positions.
 
     Args:
@@ -207,6 +257,8 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
         indel_records: INDEL coordinate adjustment records
         repeat_size: Size of each repeat unit in bp (default: 178)
         max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
+        d_values: Optional D2 values to bias insertion locations (higher D2 = more likely)
+        d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger bias)
 
     Returns:
         bool: True if array collapsed, False otherwise
@@ -215,11 +267,29 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
     target = np.random.poisson(0.5)
     consecutive_failures = 0
 
+    # Track initial sequence length for weight recalculation
+    initial_seq_length = len(seq)
+    weights = None
+    cached_weights_length = 0
+
     while count < target:
         seq_length = len(seq)
 
-        # Pick a random character position across the full sequence length
-        char_start = random.randint(0, seq_length - 1)
+        # Recompute weights if sequence length has changed or not yet computed
+        if d_values is not None and d2_bias_strength > 0:
+            if weights is None or seq_length != cached_weights_length:
+                weights = d_values_to_position_weights(d_values, seq_length, repeat_size)
+                # Apply bias strength: raise weights to power
+                weights = weights ** d2_bias_strength
+                weights = weights / np.sum(weights)  # Renormalize
+                cached_weights_length = seq_length
+
+        # Pick a character position based on D2-weighted probability
+        if weights is not None:
+            char_start = np.random.choice(seq_length, p=weights)
+        else:
+            # Uniform random position (original behavior)
+            char_start = random.randint(0, seq_length - 1)
 
         indel_type = random.choice(["DUP", "DEL"])
 
@@ -285,10 +355,10 @@ def initialize_cenh3_occupancy(num_units):
     return cenh3_occupancy
 
 def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_radii=50, window_size=100):
-    """Compute correlation dimension (D2) values from a RepeatSequence object.
+    """Compute correlation dimension (D2) values from a RepeatSequence object or string.
 
     Args:
-        seq: RepeatSequence object
+        seq: RepeatSequence object or string sequence
         repeat_len: Length of each repeat unit (default: 178)
         r_min: Minimum radius value (default: 0.01)
         r_max: Maximum radius value (default: 0.5)
@@ -298,8 +368,11 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     Returns:
         np.array: D2 values at each window position
     """
-    # Convert RepeatSequence to string
-    mutated_sequence = seq.to_string()
+    # Convert RepeatSequence to string if needed
+    if isinstance(seq, str):
+        mutated_sequence = seq
+    else:
+        mutated_sequence = seq.to_string()
 
     # Parse sequence into repeats
     n_repeats = len(mutated_sequence) // repeat_len
@@ -327,7 +400,43 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     return d_values
 
 
-def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
+def smooth_d_values_ema(previous_smoothed, current_raw, alpha=0.3):
+    """Smooth correlation dimension estimates using Exponential Moving Average.
+
+    Args:
+        previous_smoothed: Previous generation's smoothed d_values
+        current_raw: Current generation's raw d_values
+        alpha: Smoothing parameter (0-1). Higher = less smoothing. Default: 0.3
+
+    Returns:
+        smoothed: Smoothed d_values using EMA
+    """
+    current_raw = np.asarray(current_raw)
+
+    # First generation: return raw values as-is
+    if previous_smoothed is None:
+        return current_raw.copy()
+
+    previous_smoothed = np.asarray(previous_smoothed)
+
+    # Handle different lengths (sequence may have grown/shrunk due to indels)
+    if len(current_raw) != len(previous_smoothed):
+        # Resize previous smoothed to match current length via interpolation
+        if len(previous_smoothed) > 0:
+            x_old = np.linspace(0, 1, len(previous_smoothed))
+            x_new = np.linspace(0, 1, len(current_raw))
+            previous_smoothed = np.interp(x_new, x_old, previous_smoothed)
+        else:
+            # If no previous data, just return current raw
+            return current_raw.copy()
+
+    # Exponential Moving Average: smoothed = α × raw + (1-α) × previous
+    smoothed = alpha * current_raw + (1 - alpha) * previous_smoothed
+
+    return smoothed
+
+
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178, compute_correlation_dim=True, use_ema_smoothing=False, ema_alpha=0.3, use_d2_bias=False, d2_bias_strength=1.0):
     """Introduce mutations into sequence over multiple generations.
 
     Args:
@@ -335,11 +444,17 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
         generation: Starting generation number
         num_generations: Number of generations to simulate
         repeat_size: Size of each repeat unit in bp (default: 178)
+        compute_correlation_dim: Whether to compute correlation dimension (default: True)
+        use_ema_smoothing: Whether to apply EMA smoothing to d_values (default: False)
+        ema_alpha: Smoothing parameter for EMA (0-1, default: 0.3). Higher = less smoothing
+        use_d2_bias: Whether to bias insertion locations by D2 values (default: False)
+        d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
 
     Returns:
-        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history)
+        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_smoothed)
             where collapsed is True if the array collapsed to zero, False otherwise
-            d_values_history is a list of d_values arrays for each generation
+            d_values_history is a list of d_values arrays for each generation (empty if compute_correlation_dim=False)
+            d_values_smoothed is the EMA-smoothed d_values (or None if not using smoothing)
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
@@ -350,22 +465,39 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178):
     num_units = len(sequence) // repeat_size
     cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
+    # Initialize smoothed d_values as None (will be set on first iteration)
+    d_values_smoothed = None
+
     collapsed = False
     for gen in range(num_generations):
         generation += 1
 
         apply_snp_mutations(seq, generation, records)
 
-        # Check if array collapsed during INDEL mutations
-        collapsed = apply_indel_mutations(seq, generation, records, [], repeat_size)
+        # Determine which d_values to use for biasing (if enabled)
+        d_values_for_bias = None
+        if use_d2_bias and d_values_smoothed is not None:
+            d_values_for_bias = d_values_smoothed
 
-        # Compute correlation dimension
-        d_values = compute_correlation_dimension(seq, repeat_len=repeat_size)
-        d_values_history.append(d_values)
+        # Check if array collapsed during INDEL mutations
+        collapsed = apply_indel_mutations(
+            seq, generation, records, [], repeat_size,
+            d_values=d_values_for_bias,
+            d2_bias_strength=d2_bias_strength
+        )
+
+        # Compute correlation dimension if enabled
+        if compute_correlation_dim:
+            d_values = compute_correlation_dimension(seq, repeat_len=repeat_size)
+            d_values_history.append(d_values)
+
+            # Apply EMA smoothing if enabled
+            if use_ema_smoothing:
+                d_values_smoothed = smooth_d_values_ema(d_values_smoothed, d_values, alpha=ema_alpha)
 
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
 
-    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history
+    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history, d_values_smoothed
 

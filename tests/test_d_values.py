@@ -118,7 +118,7 @@ def test_d_values_structure(test_setup):
     np.random.seed(seed)
 
     sequence = read_sequence(test_setup['input_seq'])
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
 
@@ -142,13 +142,13 @@ def test_d_values_deterministic(test_setup):
     random.seed(seed)
     np.random.seed(seed)
     sequence = read_sequence(test_setup['input_seq'])
-    _, _, _, _, d_values_history1 = introduce_mutations(sequence, 0, generations)
+    _, _, _, _, d_values_history1, _ = introduce_mutations(sequence, 0, generations)
 
     # Run 2
     random.seed(seed)
     np.random.seed(seed)
     sequence = read_sequence(test_setup['input_seq'])
-    _, _, _, _, d_values_history2 = introduce_mutations(sequence, 0, generations)
+    _, _, _, _, d_values_history2, _ = introduce_mutations(sequence, 0, generations)
 
     # Should be identical
     assert len(d_values_history1) == len(d_values_history2)
@@ -175,7 +175,7 @@ def test_d_values_computation_performance(test_setup):
 
     # Time the simulation with d_values computation
     start = time.time()
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
     duration = time.time() - start

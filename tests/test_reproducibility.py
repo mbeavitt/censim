@@ -54,7 +54,7 @@ def run_simulation(test_setup, generations, seed, suffix=""):
     sequence = read_sequence(params['input_seq'])
 
     # Run simulation
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
 
@@ -157,7 +157,7 @@ def test_small_simulation_performance(test_setup):
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
     duration = time.time() - start
@@ -190,7 +190,7 @@ def test_medium_simulation_performance(test_setup):
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
     duration = time.time() - start
@@ -223,7 +223,7 @@ def test_large_simulation_performance(test_setup):
 
     # Time the simulation
     start = time.time()
-    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history = introduce_mutations(
+    mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, _ = introduce_mutations(
         sequence, 0, generations
     )
     duration = time.time() - start
@@ -270,7 +270,7 @@ def test_seed_none_is_random(test_setup):
     # First run - reset to a random state
     random.seed(None)
     np.random.seed(None)
-    mutated_sequence1, mutation_records1, cenh3_occupancy1, _, _ = introduce_mutations(
+    mutated_sequence1, mutation_records1, cenh3_occupancy1, _, _, _ = introduce_mutations(
         sequence, 0, generations
     )
 
@@ -291,7 +291,7 @@ def test_seed_none_is_random(test_setup):
 
     random.seed(None)
     np.random.seed(None)
-    mutated_sequence2, mutation_records2, cenh3_occupancy2, _, _ = introduce_mutations(
+    mutated_sequence2, mutation_records2, cenh3_occupancy2, _, _, _ = introduce_mutations(
         sequence, 0, generations
     )
 
