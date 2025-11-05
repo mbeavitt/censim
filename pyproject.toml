@@ -40,9 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-censim-run = "censim.scripts.full_sim:main"
-censim-hpc = "censim.scripts.hpc_runner:main"
-censim-manage = "censim.scripts.manage_runs:main"
+censim-run = "censim.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

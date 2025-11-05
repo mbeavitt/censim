@@ -1,0 +1,90 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author M.A. Beavitt
+    Version 0.1.0
+    Description CenSim - Centromere Evolution Simulator
+
+%help
+    CenSim - Centromere Evolution Simulator
+
+    A tool for simulating centromere evolution with repeat dynamics,
+    CENH3 occupancy, and correlation dimension analysis.
+
+    Usage:
+        singularity exec censim.sif censim-run --help
+
+    Example:
+        singularity exec censim.sif censim-run \
+            --sequence-file /path/to/input.seq \
+            --output-dir /path/to/output \
+            --max-generations 1000 \
+            --no-correlation-dimension
+
+    For fast testing (no correlation dimension calculation):
+        singularity exec censim.sif censim-run \
+            -s input.seq -o output -g 1000 --no-correlation-dimension
+
+    Mount your data directories:
+        singularity exec \
+            --bind /local/data:/mnt/data \
+            censim.sif censim-run -s /mnt/data/input.seq -o /mnt/data/output
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/censim/venv/bin:$PATH
+    export PYTHONPATH=/opt/censim/venv/lib/python3.10/site-packages:$PYTHONPATH
+
+%post
+    # Update and install dependencies
+    apt-get update && apt-get install -y \
+        python3 \
+        python3-pip \
+        python3-venv \
+        build-essential \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Create virtual environment
+    python3 -m venv /opt/censim/venv
+    . /opt/censim/venv/bin/activate
+
+    # Upgrade pip
+    pip install --no-cache-dir --upgrade pip setuptools wheel
+
+    # Install censim and dependencies
+    # Copy source files to container
+    mkdir -p /opt/censim/src
+
+    # Note: When building, use:
+    # singularity build censim.sif censim.def
+    # from the project root directory
+
+%files
+    # Copy the entire source tree
+    src /opt/censim/
+    pyproject.toml /opt/censim/
+    requirements.txt /opt/censim/
+    README.md /opt/censim/
+    data /opt/censim/
+
+%post
+    # Install the package (continuation of post section)
+    . /opt/censim/venv/bin/activate
+    cd /opt/censim
+    pip install --no-cache-dir -e .
+
+    # Verify installation
+    censim-run --help || echo "WARNING: censim-run not found in PATH"
+
+    echo "Installation complete. Use scripts/test_quick.sh or scripts/test_checkpoint.sh to test."
+
+%runscript
+    # Default action when running the container
+    exec censim-run "$@"
+
+%test
+    # Tests run after build
+    . /opt/censim/venv/bin/activate
+    censim-run --help
+    python3 -c "import censim; print('CenSim version:', censim.__version__)"
