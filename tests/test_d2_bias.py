@@ -64,7 +64,6 @@ def test_d2_bias_changes_results(test_setup):
     seq_unbiased, records_unbiased, cenh3_unbiased, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=False,
-        use_ema_smoothing=False,
         use_d2_bias=False
     )
 
@@ -74,8 +73,6 @@ def test_d2_bias_changes_results(test_setup):
     seq_biased, records_biased, cenh3_biased, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )
@@ -84,46 +81,6 @@ def test_d2_bias_changes_results(test_setup):
     assert seq_unbiased != seq_biased, "D2 bias should produce different sequences"
     assert len(records_unbiased) != len(records_biased) or records_unbiased != records_biased, \
         "D2 bias should produce different mutation records"
-
-
-def test_ema_smoothing_changes_results(test_setup):
-    """Test that enabling EMA smoothing produces different results (due to different CD calculations)."""
-    seed = 42
-    generations = 100
-
-    sequence = read_sequence(test_setup['input_seq'])
-
-    # Run 1: No EMA smoothing
-    random.seed(seed)
-    np.random.seed(seed)
-    seq_no_ema, records_no_ema, _, _, history_no_ema, smoothed_no_ema = introduce_mutations(
-        sequence, 0, generations,
-        compute_correlation_dim=True,
-        use_ema_smoothing=False,
-        use_d2_bias=False
-    )
-
-    # Run 2: With EMA smoothing (but no bias, so shouldn't affect mutations)
-    random.seed(seed)
-    np.random.seed(seed)
-    seq_with_ema, records_with_ema, _, _, history_with_ema, smoothed_with_ema = introduce_mutations(
-        sequence, 0, generations,
-        compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
-        use_d2_bias=False
-    )
-
-    # Without D2 bias, sequences should be identical (EMA doesn't affect mutations)
-    assert seq_no_ema == seq_with_ema, \
-        "EMA smoothing without D2 bias should not change mutation results"
-    assert records_no_ema == records_with_ema, \
-        "EMA smoothing without D2 bias should not change mutation records"
-
-    # But smoothed values should exist when enabled
-    assert smoothed_no_ema is None, "Smoothed values should be None when EMA disabled"
-    assert smoothed_with_ema is not None, "Smoothed values should exist when EMA enabled"
-    assert len(smoothed_with_ema) > 0, "Smoothed values array should not be empty"
 
 
 def test_d2_bias_strength_affects_results(test_setup):
@@ -147,8 +104,6 @@ def test_d2_bias_strength_affects_results(test_setup):
     seq_strength1, records_strength1, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=1.0
     )
@@ -159,8 +114,6 @@ def test_d2_bias_strength_affects_results(test_setup):
     seq_strength3, records_strength3, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=3.0
     )
@@ -172,25 +125,24 @@ def test_d2_bias_strength_affects_results(test_setup):
         "Different D2 bias strengths should produce different mutation records"
 
 
-def test_d2_bias_requires_ema_smoothing(test_setup):
-    """Test that D2 bias uses smoothed values when available."""
+def test_d2_bias_with_correlation_dim(test_setup):
+    """Test that D2 bias works with correlation dimension calculation."""
     seed = 42
     generations = 50  # Shorter for faster test
 
     sequence = read_sequence(test_setup['input_seq'])
 
-    # This should work but won't use bias (no smoothed values initially)
+    # This should work - bias uses raw d_values from correlation dimension
     random.seed(seed)
     np.random.seed(seed)
     seq, records, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=False,  # No EMA smoothing
-        use_d2_bias=True,          # But bias enabled (won't work without smoothed values)
+        use_d2_bias=True,
         d2_bias_strength=2.0
     )
 
-    # Should complete without error, but bias won't be applied
+    # Should complete without error
     assert seq is not None
     assert len(records) > 0
 
@@ -208,8 +160,6 @@ def test_d2_bias_deterministic_with_seed(test_setup):
     seq1, records1, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )
@@ -220,8 +170,6 @@ def test_d2_bias_deterministic_with_seed(test_setup):
     seq2, records2, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )
@@ -243,8 +191,6 @@ def test_d2_bias_different_seeds_different_results(test_setup):
     seq1, records1, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )
@@ -255,8 +201,6 @@ def test_d2_bias_different_seeds_different_results(test_setup):
     seq2, records2, _, _, _, _ = introduce_mutations(
         sequence, 0, generations,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )

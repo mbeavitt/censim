@@ -1,6 +1,6 @@
 import random
 import numpy as np
-from .identity import all_vs_all_identity_scipy
+from .identity import all_vs_all_identity_numba
 from .correlation_dimension import (
     hamming_distance_matrix,
     sliding_window_local_correlation,
@@ -378,8 +378,8 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     n_repeats = len(mutated_sequence) // repeat_len
     repeats = [mutated_sequence[i*repeat_len:(i+1)*repeat_len] for i in range(n_repeats)]
 
-    # Compute identity matrix with subsampling
-    identity_matrix = all_vs_all_identity_scipy(repeats, scale_factor=30, max_exact_size=1000)
+    # Compute identity matrix with subsampling (using optimized numba version)
+    identity_matrix = all_vs_all_identity_numba(repeats, scale_factor=30, max_exact_size=1000)
 
     # Convert to distance matrix
     D = hamming_distance_matrix(identity_matrix)
@@ -400,43 +400,7 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     return d_values
 
 
-def smooth_d_values_ema(previous_smoothed, current_raw, alpha=0.3):
-    """Smooth correlation dimension estimates using Exponential Moving Average.
-
-    Args:
-        previous_smoothed: Previous generation's smoothed d_values
-        current_raw: Current generation's raw d_values
-        alpha: Smoothing parameter (0-1). Higher = less smoothing. Default: 0.3
-
-    Returns:
-        smoothed: Smoothed d_values using EMA
-    """
-    current_raw = np.asarray(current_raw)
-
-    # First generation: return raw values as-is
-    if previous_smoothed is None:
-        return current_raw.copy()
-
-    previous_smoothed = np.asarray(previous_smoothed)
-
-    # Handle different lengths (sequence may have grown/shrunk due to indels)
-    if len(current_raw) != len(previous_smoothed):
-        # Resize previous smoothed to match current length via interpolation
-        if len(previous_smoothed) > 0:
-            x_old = np.linspace(0, 1, len(previous_smoothed))
-            x_new = np.linspace(0, 1, len(current_raw))
-            previous_smoothed = np.interp(x_new, x_old, previous_smoothed)
-        else:
-            # If no previous data, just return current raw
-            return current_raw.copy()
-
-    # Exponential Moving Average: smoothed = α × raw + (1-α) × previous
-    smoothed = alpha * current_raw + (1 - alpha) * previous_smoothed
-
-    return smoothed
-
-
-def introduce_mutations(sequence, generation, num_generations, repeat_size=178, compute_correlation_dim=True, use_ema_smoothing=False, ema_alpha=0.3, use_d2_bias=False, d2_bias_strength=1.0):
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178, compute_correlation_dim=True, use_d2_bias=False, d2_bias_strength=1.0):
     """Introduce mutations into sequence over multiple generations.
 
     Args:
@@ -445,16 +409,14 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         num_generations: Number of generations to simulate
         repeat_size: Size of each repeat unit in bp (default: 178)
         compute_correlation_dim: Whether to compute correlation dimension (default: True)
-        use_ema_smoothing: Whether to apply EMA smoothing to d_values (default: False)
-        ema_alpha: Smoothing parameter for EMA (0-1, default: 0.3). Higher = less smoothing
         use_d2_bias: Whether to bias insertion locations by D2 values (default: False)
         d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
 
     Returns:
-        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_smoothed)
+        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest)
             where collapsed is True if the array collapsed to zero, False otherwise
             d_values_history is a list of d_values arrays for each generation (empty if compute_correlation_dim=False)
-            d_values_smoothed is the EMA-smoothed d_values (or None if not using smoothing)
+            d_values_latest is the most recent d_values array (or None if compute_correlation_dim=False)
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
@@ -465,8 +427,8 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
     num_units = len(sequence) // repeat_size
     cenh3_occupancy = initialize_cenh3_occupancy(num_units)
 
-    # Initialize smoothed d_values as None (will be set on first iteration)
-    d_values_smoothed = None
+    # Track latest d_values for biasing
+    d_values_latest = None
 
     collapsed = False
     for gen in range(num_generations):
@@ -476,8 +438,8 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
 
         # Determine which d_values to use for biasing (if enabled)
         d_values_for_bias = None
-        if use_d2_bias and d_values_smoothed is not None:
-            d_values_for_bias = d_values_smoothed
+        if use_d2_bias and d_values_latest is not None:
+            d_values_for_bias = d_values_latest
 
         # Check if array collapsed during INDEL mutations
         collapsed = apply_indel_mutations(
@@ -488,16 +450,12 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
 
         # Compute correlation dimension if enabled
         if compute_correlation_dim:
-            d_values = compute_correlation_dimension(seq, repeat_len=repeat_size)
-            d_values_history.append(d_values)
-
-            # Apply EMA smoothing if enabled
-            if use_ema_smoothing:
-                d_values_smoothed = smooth_d_values_ema(d_values_smoothed, d_values, alpha=ema_alpha)
+            d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size)
+            d_values_history.append(d_values_latest)
 
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
 
-    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history, d_values_smoothed
+    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history, d_values_latest
 

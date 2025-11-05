@@ -71,8 +71,6 @@ def test_d2_bias():
     _, records_biased, _, _, _, _ = introduce_mutations(
         sequence, 0, 10000,
         compute_correlation_dim=True,
-        use_ema_smoothing=True,
-        ema_alpha=0.3,
         use_d2_bias=True,
         d2_bias_strength=2.0
     )

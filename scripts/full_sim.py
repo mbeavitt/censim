@@ -18,10 +18,6 @@ def main():
                         help="Output directory (default: ./output)")
     parser.add_argument("--no-correlation-dimension", action="store_true",
                         help="Disable correlation dimension calculations (faster)")
-    parser.add_argument("--ema-smoothing", action="store_true",
-                        help="Enable EMA smoothing of correlation dimension values across generations")
-    parser.add_argument("--ema-alpha", type=float, default=0.3,
-                        help="EMA smoothing parameter (0-1, default: 0.3). Higher = less smoothing")
     parser.add_argument("--d2-bias", action="store_true",
                         help="Bias insertion locations toward high D2 regions")
     parser.add_argument("--d2-bias-strength", type=float, default=1.0,
@@ -29,20 +25,16 @@ def main():
 
     args = parser.parse_args()
 
-    # Validation: D2 bias requires both CD computation and EMA smoothing
+    # Validation: D2 bias requires CD computation
     if args.d2_bias:
         if args.no_correlation_dimension:
             parser.error("--d2-bias requires correlation dimension calculation (don't use --no-correlation-dimension)")
-        if not args.ema_smoothing:
-            parser.error("--d2-bias requires --ema-smoothing to be enabled")
 
     # Create output directories
     output_base = Path(args.output_dir)
     os.makedirs(output_base / "fasta", exist_ok=True)
     os.makedirs(output_base / "records", exist_ok=True)
     os.makedirs(output_base / "cenh3", exist_ok=True)
-    if args.ema_smoothing:
-        os.makedirs(output_base / "d_values", exist_ok=True)
 
     # Initial parameters
     input_sequence_file = args.sequence_file
@@ -55,11 +47,9 @@ def main():
         print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
-        mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_smoothed = introduce_mutations(
+        mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest = introduce_mutations(
             current_sequence, generation - 1000, 1000,
             compute_correlation_dim=not args.no_correlation_dimension,
-            use_ema_smoothing=args.ema_smoothing,
-            ema_alpha=args.ema_alpha,
             use_d2_bias=args.d2_bias,
             d2_bias_strength=args.d2_bias_strength
         )
@@ -87,13 +77,6 @@ def main():
                     f.write(f"{idx}\t1\n")
                 else:
                     f.write(f"{idx}\t0\n")
-
-        # Write smoothed d_values if EMA smoothing is enabled
-        if args.ema_smoothing and d_values_smoothed is not None:
-            d_values_output = output_base / "d_values" / f"{generation}generation.d_values.txt"
-            with open(d_values_output, "w") as f:
-                for idx, d_val in enumerate(d_values_smoothed):
-                    f.write(f"{idx}\t{d_val}\n")
 
         print("done")
 

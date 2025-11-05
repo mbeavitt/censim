@@ -28,11 +28,12 @@ from censim.correlation_dimension import (
     correlation_sum_from_distance_matrix,
     estimate_D2_from_C_r_batch,
 )
+from censim.identity import all_vs_all_identity_numba
 
 
 def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
     """
-    Compute all vs all identity matrix using scipy's pdist with adaptive subsampling.
+    Compute all vs all identity matrix using optimized numba (46x faster than scipy).
 
     Args:
         repeats: list of sequences (strings)
@@ -40,9 +41,10 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
         scale_factor: controls subsampling rate for large arrays
 
     Returns:
-        tuple of (identity_matrix, subsample_every)
+        tuple of (identity_matrix, subsample_every, subset_repeats)
         - identity_matrix: numpy array of shape (n_repeats, n_repeats) with pairwise identities
         - subsample_every: subsampling interval (1 = no subsampling)
+        - subset_repeats: the subsampled repeat sequences
     """
     n_repeats = len(repeats)
 
@@ -57,21 +59,16 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
         print(f"Computing subsampled identity (every {subsample_every}th sequence, {subset_size}/{n_repeats} total)...")
 
     if subsample_every == 1:
-        # Exact computation
-        seq_array = np.array([[ord(c) for c in seq] for seq in repeats], dtype=np.uint8)
-        distances = pdist(seq_array, metric='hamming')
-        identity_matrix = 1 - squareform(distances)
+        # Exact computation using optimized numba
+        identity_matrix = all_vs_all_identity_numba(repeats, max_exact_size=max_exact_size, scale_factor=scale_factor)
         subset_repeats = repeats  # No subsampling
     else:
         # Subsampled computation
         subset_indices = np.arange(0, n_repeats, subsample_every)
         subset_repeats = [repeats[i] for i in subset_indices]
+        identity_matrix = all_vs_all_identity_numba(subset_repeats, max_exact_size=max_exact_size, scale_factor=scale_factor)
 
-        seq_array = np.array([[ord(c) for c in seq] for seq in subset_repeats], dtype=np.uint8)
-        distances = pdist(seq_array, metric='hamming')
-        identity_matrix = 1 - squareform(distances)
-
-    return identity_matrix.astype(np.float32), subsample_every, subset_repeats
+    return identity_matrix, subsample_every, subset_repeats
 
 
 def box_count_2d(binary_matrix):
@@ -261,12 +258,12 @@ def calculate_kmer_entropy(sequence_string, k=4):
     if len(sequence_string) < k:
         return 0.0
 
-    # Extract all k-mers as a view (no copying)
-    n_kmers = len(sequence_string) - k + 1
+    # Extract non-overlapping k-mers (side-by-side windows)
+    n_kmers = len(sequence_string) // k  # Integer division for non-overlapping
 
     # Use numpy for fast counting
     # Convert to array of k-mer hashes for fast unique counting
-    kmer_list = [sequence_string[i:i+k] for i in range(n_kmers)]
+    kmer_list = [sequence_string[i*k:(i+1)*k] for i in range(n_kmers)]
     unique_kmers, counts = np.unique(kmer_list, return_counts=True)
 
     # Calculate Shannon entropy using vectorized operations
