@@ -22,6 +22,8 @@ def main():
                         help="Bias insertion locations toward high D2 regions")
     parser.add_argument("--d2-bias-strength", type=float, default=1.0,
                         help="Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)")
+    parser.add_argument("--max-generations", type=int, default=6000000,
+                        help="Maximum generations to run (default: 6000000)")
 
     args = parser.parse_args()
 
@@ -42,9 +44,9 @@ def main():
     # Read initial sequence
     current_sequence = read_sequence(input_sequence_file)
 
-    # Run simulation for 6 million generations in 1000-generation chunks
-    for generation in range(1000, 6000001, 1000):
-        print(f"[{generation:>7}/6000000] Running simulation...", end=" ")
+    # Run simulation for specified generations in 1000-generation chunks
+    for generation in range(1000, args.max_generations + 1, 1000):
+        print(f"[{generation:>7}/{args.max_generations}] Running simulation...", end=" ")
 
         # Run 1000 generations of mutation
         mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest = introduce_mutations(
