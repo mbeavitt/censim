@@ -128,62 +128,214 @@ def calculate_kmer_entropy(sequence_string, k=4):
 
     return normalized_entropy
 
-def sliding_window_repeat_type_entropy(repeats, window_size=100):
+def sliding_window_repeat_diversity(identity_matrix, window_size=100):
     """
-    Calculate entropy based on the diversity of unique repeat types in sliding windows.
+    Calculate diversity based on average pairwise distance in sliding windows.
 
-    Each unique repeat sequence is assigned a unique ID, then Shannon entropy is
-    calculated based on the distribution of these IDs within each window.
+    For each window, calculates the mean pairwise distance (1 - identity) between
+    all pairs of repeats in that window. This produces a smooth, continuous measure
+    of local diversity.
 
     Args:
-        repeats: list of repeat sequences
+        identity_matrix: pairwise identity matrix for the repeats
         window_size: number of repeats per window
 
     Returns:
         positions: center positions of windows (in repeat indices)
-        entropy_values: entropy at each window position
+        diversity_values: average pairwise distance at each window position
     """
     start_time = time.time()
 
-    # Create mapping of unique repeats to IDs
-    unique_repeats = {}
-    repeat_ids = []
-    current_id = 0
-
-    for repeat in repeats:
-        if repeat not in unique_repeats:
-            unique_repeats[repeat] = current_id
-            current_id += 1
-        repeat_ids.append(unique_repeats[repeat])
-
-    repeat_ids = np.array(repeat_ids)
-    n_unique = len(unique_repeats)
-
-    print(f"  Found {n_unique} unique repeat types out of {len(repeats)} total repeats")
-
-    N = len(repeats)
+    N = identity_matrix.shape[0]
     positions = []
-    entropy_values = []
+    diversity_values = []
 
     # Sliding window across repeats
     for i in range(0, N - window_size + 1, 1):
         center = i + window_size // 2
         positions.append(center)
 
-        # Get IDs in this window
-        window_ids = repeat_ids[i:i+window_size]
+        # Extract submatrix for this window
+        window_matrix = identity_matrix[i:i+window_size, i:i+window_size]
 
-        # Calculate Shannon entropy
-        unique_ids, counts = np.unique(window_ids, return_counts=True)
-        probs = counts / window_size
-        entropy = -np.sum(probs * np.log2(probs))
+        # Calculate average pairwise distance (1 - identity)
+        # Only use upper triangle to avoid counting pairs twice and diagonal
+        upper_tri_indices = np.triu_indices(window_size, k=1)
+        pairwise_identities = window_matrix[upper_tri_indices]
+        pairwise_distances = 1.0 - pairwise_identities
 
-        entropy_values.append(entropy)
+        avg_distance = np.mean(pairwise_distances)
+        diversity_values.append(avg_distance)
 
     elapsed_time = time.time() - start_time
-    print(f"  Repeat-type entropy calculation time: {elapsed_time:.6f} seconds ({len(entropy_values)} windows)")
+    print(f"  Repeat diversity calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
 
-    return positions, entropy_values
+    return positions, diversity_values
+
+def sliding_window_kmer_entropy_variance(repeats, window_size=100, k=4):
+    """
+    Calculate variance of per-repeat k-mer entropy within sliding windows.
+
+    Precomputes k-mer entropy for each repeat, then measures variance within windows.
+    High variance = diverse repeats, low variance = similar repeats.
+    O(n) precompute + O(window_size) per window.
+
+    Args:
+        repeats: list of repeat sequences
+        window_size: number of repeats per window
+        k: k-mer size
+
+    Returns:
+        positions: center positions of windows
+        variance_values: variance of k-mer entropy at each position
+    """
+    start_time = time.time()
+
+    # Precompute k-mer entropy for each repeat
+    per_repeat_entropy = []
+    for repeat in repeats:
+        entropy = calculate_kmer_entropy(repeat, k=k)
+        per_repeat_entropy.append(entropy)
+
+    per_repeat_entropy = np.array(per_repeat_entropy)
+
+    N = len(repeats)
+    positions = []
+    variance_values = []
+
+    # Sliding window
+    for i in range(0, N - window_size + 1, 1):
+        center = i + window_size // 2
+        positions.append(center)
+
+        window_entropies = per_repeat_entropy[i:i+window_size]
+        variance = np.var(window_entropies)
+        variance_values.append(variance)
+
+    elapsed_time = time.time() - start_time
+    print(f"  K-mer entropy variance calculation time: {elapsed_time:.6f} seconds ({len(variance_values)} windows)")
+
+    return positions, variance_values
+
+def sliding_window_hash_diversity(repeats, window_size=100):
+    """
+    Calculate hash-based diversity within sliding windows.
+
+    Hashes each repeat and measures variance of hash values within windows.
+    Very fast but loses biological meaning.
+
+    Args:
+        repeats: list of repeat sequences
+        window_size: number of repeats per window
+
+    Returns:
+        positions: center positions of windows
+        diversity_values: normalized variance of hash values
+    """
+    start_time = time.time()
+
+    # Hash each repeat to a numeric value
+    repeat_hashes = np.array([hash(repeat) % (2**32) for repeat in repeats], dtype=np.float64)
+
+    # Normalize to 0-1 range for stability
+    repeat_hashes = (repeat_hashes - repeat_hashes.min()) / (repeat_hashes.max() - repeat_hashes.min())
+
+    N = len(repeats)
+    positions = []
+    diversity_values = []
+
+    # Sliding window
+    for i in range(0, N - window_size + 1, 1):
+        center = i + window_size // 2
+        positions.append(center)
+
+        window_hashes = repeat_hashes[i:i+window_size]
+        variance = np.var(window_hashes)
+        diversity_values.append(variance)
+
+    elapsed_time = time.time() - start_time
+    print(f"  Hash diversity calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
+
+    return positions, diversity_values
+
+def sliding_window_kmer_profile_distance(repeats, window_size=100, k=4):
+    """
+    Calculate average distance from k-mer consensus within sliding windows.
+
+    Uses binary presence/absence vectors (bit vectors) instead of frequency counts.
+    This is faster and measures k-mer diversity rather than frequency distribution.
+
+    Args:
+        repeats: list of repeat sequences
+        window_size: number of repeats per window
+        k: k-mer size
+
+    Returns:
+        positions: center positions of windows
+        diversity_values: average distance from consensus
+    """
+    start_time = time.time()
+
+    # Generate all possible k-mers for DNA (4^k possibilities)
+    bases = ['A', 'C', 'G', 'T']
+    all_possible_kmers = []
+
+    def generate_kmers(prefix, k):
+        if k == 0:
+            all_possible_kmers.append(prefix)
+            return
+        for base in bases:
+            generate_kmers(prefix + base, k - 1)
+
+    generate_kmers('', k)
+    kmer_to_idx = {kmer: i for i, kmer in enumerate(all_possible_kmers)}
+    n_kmers_total = len(all_possible_kmers)
+
+    # Precompute all k-mer presence/absence as binary vectors
+    print(f"    Precomputing k-mer presence/absence for {len(repeats)} repeats...")
+    precompute_start = time.time()
+
+    # Use uint8 to store binary (0 or 1) - more memory efficient than float
+    profile_matrix = np.zeros((len(repeats), n_kmers_total), dtype=np.uint8)
+
+    for rep_idx, repeat in enumerate(repeats):
+        if len(repeat) < k:
+            continue
+        n_kmers = len(repeat) // k
+        kmer_list = [repeat[i*k:(i+1)*k] for i in range(n_kmers)]
+
+        for kmer in kmer_list:
+            if kmer in kmer_to_idx:  # Only mark valid k-mers (all ACGT)
+                profile_matrix[rep_idx, kmer_to_idx[kmer]] = 1  # Mark as present
+
+    precompute_time = time.time() - precompute_start
+    print(f"    Precomputation took {precompute_time:.4f}s")
+
+    N = len(repeats)
+    positions = []
+    diversity_values = []
+
+    # Sliding window using vectorized operations
+    for i in range(0, N - window_size + 1, 1):
+        center = i + window_size // 2
+        positions.append(center)
+
+        # Get binary profile vectors for this window
+        window_profiles = profile_matrix[i:i+window_size].astype(np.float32)
+
+        # Consensus is proportion of repeats with each k-mer (ranges 0-1)
+        consensus = window_profiles.mean(axis=0)
+
+        # Calculate Hamming-like distances from consensus
+        # Distance = how different each repeat is from the consensus
+        distances = np.abs(window_profiles - consensus).sum(axis=1) / n_kmers_total
+        avg_distance = distances.mean()
+        diversity_values.append(avg_distance)
+
+    elapsed_time = time.time() - start_time
+    print(f"  K-mer profile distance calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
+
+    return positions, diversity_values
 
 input_file = "data/2191000generation.out.fa"
 repeat_len = 178
@@ -220,23 +372,44 @@ cd_positions_scaled = [pos * subsample_every for pos in cd_positions]
 print(f"\nMean correlation dimension (D2): {np.mean(cd_d2_values):.4f}")
 print(f"Std correlation dimension (D2): {np.std(cd_d2_values):.4f}")
 
-# Calculate repeat-type entropy
-print(f"\nCalculating repeat-type entropy...")
-rt_positions, rt_values = sliding_window_repeat_type_entropy(subsampled_repeats, window_size=100)
-rt_positions_scaled = [pos * subsample_every for pos in rt_positions]
-print(f"\nMean repeat-type entropy: {np.mean(rt_values):.4f}")
-print(f"Std repeat-type entropy: {np.std(rt_values):.4f}")
+# Calculate repeat diversity (average pairwise distance)
+print(f"\nCalculating repeat diversity (average pairwise distance)...")
+rd_positions, rd_values = sliding_window_repeat_diversity(identity_matrix, window_size=100)
+rd_positions_scaled = [pos * subsample_every for pos in rd_positions]
+print(f"  Mean repeat diversity: {np.mean(rd_values):.4f}")
+print(f"  Std repeat diversity: {np.std(rd_values):.4f}")
+
+# Calculate k-mer entropy variance
+print(f"\nCalculating k-mer entropy variance...")
+kev_positions, kev_values = sliding_window_kmer_entropy_variance(subsampled_repeats, window_size=100, k=4)
+kev_positions_scaled = [pos * subsample_every for pos in kev_positions]
+print(f"  Mean k-mer entropy variance: {np.mean(kev_values):.4f}")
+print(f"  Std k-mer entropy variance: {np.std(kev_values):.4f}")
+
+# Calculate hash diversity
+print(f"\nCalculating hash diversity...")
+hd_positions, hd_values = sliding_window_hash_diversity(subsampled_repeats, window_size=100)
+hd_positions_scaled = [pos * subsample_every for pos in hd_positions]
+print(f"  Mean hash diversity: {np.mean(hd_values):.4f}")
+print(f"  Std hash diversity: {np.std(hd_values):.4f}")
+
+# Calculate k-mer profile distance
+print(f"\nCalculating k-mer profile distance...")
+kpd_positions, kpd_values = sliding_window_kmer_profile_distance(subsampled_repeats, window_size=100, k=4)
+kpd_positions_scaled = [pos * subsample_every for pos in kpd_positions]
+print(f"  Mean k-mer profile distance: {np.mean(kpd_values):.4f}")
+print(f"  Std k-mer profile distance: {np.std(kpd_values):.4f}")
 
 # Align arrays by matching positions
 # k-mer positions start at window_size//2 due to centering
 # CD positions start at 0 due to zero-padding
 # We need to align them to the same x-axis
-print(f"\nAligning arrays: k-mer has {len(kmer_values)} windows, CD has {len(cd_d2_values)} windows, RT has {len(rt_values)} windows")
+print(f"\nAligning arrays: k-mer has {len(kmer_values)} windows, CD has {len(cd_d2_values)} windows, RD has {len(rd_values)} windows")
 print(f"  k-mer first position: {kmer_positions_scaled[0]}, last: {kmer_positions_scaled[-1]}")
 print(f"  CD first position: {cd_positions_scaled[0]}, last: {cd_positions_scaled[-1]}")
-print(f"  RT first position: {rt_positions_scaled[0]}, last: {rt_positions_scaled[-1]}")
+print(f"  RD first position: {rd_positions_scaled[0]}, last: {rd_positions_scaled[-1]}")
 
-# Use k-mer positions as reference, and extract CD and RT values at matching positions
+# Use k-mer positions as reference, and extract CD and RD values at matching positions
 kmer_values_aligned = np.array(kmer_values)
 kmer_positions_aligned = np.array(kmer_positions_scaled)
 
@@ -253,64 +426,95 @@ for kpos in kmer_positions_aligned:
 
 cd_d2_values_aligned = np.array(cd_d2_values_aligned)
 
-# Extract RT values at positions matching k-mer
-rt_values_list = list(rt_values)
-rt_positions_list = list(rt_positions_scaled)
+# Extract all new metrics at positions matching k-mer
+rd_values_aligned = []
+kev_values_aligned = []
+hd_values_aligned = []
+kpd_values_aligned = []
 
-rt_values_aligned = []
 for kpos in kmer_positions_aligned:
-    # Find closest RT position
-    idx = min(range(len(rt_positions_list)), key=lambda i: abs(rt_positions_list[i] - kpos))
-    rt_values_aligned.append(rt_values_list[idx])
+    # Repeat Diversity
+    idx = min(range(len(rd_positions_scaled)), key=lambda i: abs(rd_positions_scaled[i] - kpos))
+    rd_values_aligned.append(rd_values[idx])
 
-rt_values_aligned = np.array(rt_values_aligned)
+    # K-mer Entropy Variance
+    idx = min(range(len(kev_positions_scaled)), key=lambda i: abs(kev_positions_scaled[i] - kpos))
+    kev_values_aligned.append(kev_values[idx])
+
+    # Hash Diversity
+    idx = min(range(len(hd_positions_scaled)), key=lambda i: abs(hd_positions_scaled[i] - kpos))
+    hd_values_aligned.append(hd_values[idx])
+
+    # K-mer Profile Distance
+    idx = min(range(len(kpd_positions_scaled)), key=lambda i: abs(kpd_positions_scaled[i] - kpos))
+    kpd_values_aligned.append(kpd_values[idx])
+
+rd_values_aligned = np.array(rd_values_aligned)
+kev_values_aligned = np.array(kev_values_aligned)
+hd_values_aligned = np.array(hd_values_aligned)
+kpd_values_aligned = np.array(kpd_values_aligned)
+
 print(f"  Aligned {len(kmer_values_aligned)} positions")
 
 # Create comparison plot
 print(f"\nCreating comparison plot...")
-fig, ax = plt.subplots(1, 1, figsize=(14, 6))
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+ax1, ax2, ax3, ax4, ax5, ax6 = axes.flatten()
 
-# Normalize metrics to 0-1 range
-kmer_range = np.max(kmer_values_aligned) - np.min(kmer_values_aligned)
-cd_range = np.max(cd_d2_values_aligned) - np.min(cd_d2_values_aligned)
-rt_range = np.max(rt_values_aligned) - np.min(rt_values_aligned)
+# Helper function to normalize
+def normalize(values):
+    vmin, vmax = np.min(values), np.max(values)
+    if vmax - vmin > 0:
+        return (values - vmin) / (vmax - vmin)
+    return np.zeros_like(values)
 
-if kmer_range > 0:
-    kmer_normalized = (kmer_values_aligned - np.min(kmer_values_aligned)) / kmer_range
-else:
-    kmer_normalized = np.zeros_like(kmer_values_aligned)
+# Plot 1: k-mer Entropy
+ax1.plot(kmer_positions_aligned, normalize(kmer_values_aligned), color='g', linewidth=1.5)
+ax1.set_xlabel('Repeat Index', fontsize=10)
+ax1.set_ylabel('Normalized Value', fontsize=10)
+ax1.set_title('k-mer Entropy', fontsize=11, fontweight='bold')
+ax1.grid(True, alpha=0.3)
+ax1.set_xlim(0, n_repeats)
 
-if cd_range > 0:
-    cd_normalized = (cd_d2_values_aligned - np.min(cd_d2_values_aligned)) / cd_range
-else:
-    cd_normalized = np.zeros_like(cd_d2_values_aligned)
+# Plot 2: Correlation Dimension
+ax2.plot(kmer_positions_aligned, normalize(cd_d2_values_aligned), color='b', linewidth=1.5)
+ax2.set_xlabel('Repeat Index', fontsize=10)
+ax2.set_ylabel('Normalized Value', fontsize=10)
+ax2.set_title('Correlation Dimension (D2)', fontsize=11, fontweight='bold')
+ax2.grid(True, alpha=0.3)
+ax2.set_xlim(0, n_repeats)
 
-if rt_range > 0:
-    rt_normalized = (rt_values_aligned - np.min(rt_values_aligned)) / rt_range
-else:
-    rt_normalized = np.zeros_like(rt_values_aligned)
+# Plot 3: Repeat Diversity (with identity matrix)
+ax3.plot(kmer_positions_aligned, normalize(rd_values_aligned), color='r', linewidth=1.5)
+ax3.set_xlabel('Repeat Index', fontsize=10)
+ax3.set_ylabel('Normalized Value', fontsize=10)
+ax3.set_title('Repeat Diversity (w/ identity matrix)', fontsize=11, fontweight='bold')
+ax3.grid(True, alpha=0.3)
+ax3.set_xlim(0, n_repeats)
 
-# Plot all methods
-ax.plot(kmer_positions_aligned, kmer_normalized, color='g', linewidth=1.5, label='k-mer Entropy', alpha=0.8)
-ax.plot(kmer_positions_aligned, cd_normalized, color='b', linewidth=1.5, label='Correlation Dimension', alpha=0.8)
-ax.plot(kmer_positions_aligned, rt_normalized, color='r', linewidth=1.5, label='Repeat-Type Entropy', alpha=0.8)
+# Plot 4: K-mer Entropy Variance
+ax4.plot(kmer_positions_aligned, normalize(kev_values_aligned), color='purple', linewidth=1.5)
+ax4.set_xlabel('Repeat Index', fontsize=10)
+ax4.set_ylabel('Normalized Value', fontsize=10)
+ax4.set_title('K-mer Entropy Variance', fontsize=11, fontweight='bold')
+ax4.grid(True, alpha=0.3)
+ax4.set_xlim(0, n_repeats)
 
-ax.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
-ax.set_ylabel('Normalized Complexity (0-1)', fontsize=12, fontweight='bold')
-ax.set_title('All Methods Comparison (Normalized)', fontsize=13, fontweight='bold')
-ax.legend(fontsize=10, loc='best')
-ax.grid(True, alpha=0.3)
-ax.set_xlim(0, n_repeats)
+# Plot 5: Hash Diversity
+ax5.plot(kmer_positions_aligned, normalize(hd_values_aligned), color='orange', linewidth=1.5)
+ax5.set_xlabel('Repeat Index', fontsize=10)
+ax5.set_ylabel('Normalized Value', fontsize=10)
+ax5.set_title('Hash Diversity', fontsize=11, fontweight='bold')
+ax5.grid(True, alpha=0.3)
+ax5.set_xlim(0, n_repeats)
 
-# Calculate correlations
-correlation_kmer_cd = np.corrcoef(kmer_values_aligned, cd_d2_values_aligned)[0, 1]
-correlation_kmer_rt = np.corrcoef(kmer_values_aligned, rt_values_aligned)[0, 1]
-correlation_cd_rt = np.corrcoef(cd_d2_values_aligned, rt_values_aligned)[0, 1]
-
-comp_stats_text = f'Corr(k-mer, CD): {correlation_kmer_cd:.3f}\nCorr(k-mer, RT): {correlation_kmer_rt:.3f}\nCorr(CD, RT): {correlation_cd_rt:.3f}'
-ax.text(0.98, 0.98, comp_stats_text, transform=ax.transAxes,
-        fontsize=10, verticalalignment='top', horizontalalignment='right',
-        bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
+# Plot 6: K-mer Profile Distance
+ax6.plot(kmer_positions_aligned, normalize(kpd_values_aligned), color='cyan', linewidth=1.5)
+ax6.set_xlabel('Repeat Index', fontsize=10)
+ax6.set_ylabel('Normalized Value', fontsize=10)
+ax6.set_title('K-mer Profile Distance', fontsize=11, fontweight='bold')
+ax6.grid(True, alpha=0.3)
+ax6.set_xlim(0, n_repeats)
 
 plt.tight_layout()
 
@@ -322,10 +526,14 @@ print(f"Plot saved as {output_file}")
 
 plt.show()
 print(f"\nCompleted {input_file}")
-print(f"\n=== Correlation Summary ===")
-print(f"Corr(k-mer, Correlation Dimension): {correlation_kmer_cd:.4f}")
-print(f"Corr(k-mer, Repeat-Type Entropy): {correlation_kmer_rt:.4f}")
-print(f"Corr(Correlation Dimension, Repeat-Type Entropy): {correlation_cd_rt:.4f}")
+print(f"\n=== Summary ===")
+print(f"All 6 metrics plotted:")
+print(f"  1. k-mer Entropy (baseline)")
+print(f"  2. Correlation Dimension (D2) - uses identity matrix")
+print(f"  3. Repeat Diversity - uses identity matrix")
+print(f"  4. K-mer Entropy Variance - NO identity matrix")
+print(f"  5. Hash Diversity - NO identity matrix")
+print(f"  6. K-mer Profile Distance - NO identity matrix")
 
 #input_dir = os.listdir("output/fasta")
 #for f in input_dir[:100]:
