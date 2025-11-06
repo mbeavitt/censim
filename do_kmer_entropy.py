@@ -197,8 +197,7 @@ fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 12))
 ax1.plot(kmer_positions_scaled, kmer_values, color='g', linewidth=1.5, label='k-mer Entropy', alpha=0.8)
 ax1.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
 ax1.set_ylabel('k-mer Entropy (Normalized)', fontsize=12, fontweight='bold')
-ax1.set_title(f'k-mer Entropy Analysis\nWindow size: {window_size} repeats | {n_repeats} total repeats',
-             fontsize=14, fontweight='bold')
+ax1.set_title('k-mer Entropy', fontsize=12)
 ax1.legend(fontsize=10, loc='best')
 ax1.grid(True, alpha=0.3)
 ax1.set_xlim(0, n_repeats)
@@ -213,8 +212,7 @@ ax1.text(0.98, 0.98, stats_text, transform=ax1.transAxes,
 ax2.plot(cd_positions_scaled, cd_d2_values, color='b', linewidth=1.5, label='Correlation Dimension (D2)', alpha=0.8)
 ax2.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
 ax2.set_ylabel('Correlation Dimension (D2)', fontsize=12, fontweight='bold')
-ax2.set_title(f'Correlation Dimension Analysis\nWindow size: {window_size} repeats | {n_repeats} total repeats',
-             fontsize=14, fontweight='bold')
+ax2.set_title('Correlation Dimension (D2)', fontsize=12)
 ax2.legend(fontsize=10, loc='best')
 ax2.grid(True, alpha=0.3)
 ax2.set_xlim(0, n_repeats)
@@ -249,8 +247,7 @@ ax3.plot(kmer_positions_aligned, kmer_normalized, color='g', linewidth=1.5, labe
 ax3.plot(kmer_positions_aligned, cd_normalized, color='b', linewidth=1.5, label='Correlation Dimension (normalized)', alpha=0.8)
 ax3.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
 ax3.set_ylabel('Normalized Complexity (0-1)', fontsize=12, fontweight='bold')
-ax3.set_title(f'Metric Comparison (Normalized)\nWindow size: {window_size} repeats | {n_repeats} total repeats',
-             fontsize=14, fontweight='bold')
+ax3.set_title('Metric Comparison (Normalized)', fontsize=12)
 ax3.legend(fontsize=10, loc='best')
 ax3.grid(True, alpha=0.3)
 ax3.set_xlim(0, n_repeats)
@@ -262,7 +259,7 @@ ax3.text(0.98, 0.98, comp_stats_text, transform=ax3.transAxes,
         fontsize=10, verticalalignment='top', horizontalalignment='right',
         bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
 
-plt.tight_layout()
+plt.tight_layout(h_pad=3.0)
 
 # Save plot
 output_file = 'output/kmer_vs_cd_comparison.png'
