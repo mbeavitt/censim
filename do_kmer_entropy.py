@@ -128,6 +128,63 @@ def calculate_kmer_entropy(sequence_string, k=4):
 
     return normalized_entropy
 
+def sliding_window_repeat_type_entropy(repeats, window_size=100):
+    """
+    Calculate entropy based on the diversity of unique repeat types in sliding windows.
+
+    Each unique repeat sequence is assigned a unique ID, then Shannon entropy is
+    calculated based on the distribution of these IDs within each window.
+
+    Args:
+        repeats: list of repeat sequences
+        window_size: number of repeats per window
+
+    Returns:
+        positions: center positions of windows (in repeat indices)
+        entropy_values: entropy at each window position
+    """
+    start_time = time.time()
+
+    # Create mapping of unique repeats to IDs
+    unique_repeats = {}
+    repeat_ids = []
+    current_id = 0
+
+    for repeat in repeats:
+        if repeat not in unique_repeats:
+            unique_repeats[repeat] = current_id
+            current_id += 1
+        repeat_ids.append(unique_repeats[repeat])
+
+    repeat_ids = np.array(repeat_ids)
+    n_unique = len(unique_repeats)
+
+    print(f"  Found {n_unique} unique repeat types out of {len(repeats)} total repeats")
+
+    N = len(repeats)
+    positions = []
+    entropy_values = []
+
+    # Sliding window across repeats
+    for i in range(0, N - window_size + 1, 1):
+        center = i + window_size // 2
+        positions.append(center)
+
+        # Get IDs in this window
+        window_ids = repeat_ids[i:i+window_size]
+
+        # Calculate Shannon entropy
+        unique_ids, counts = np.unique(window_ids, return_counts=True)
+        probs = counts / window_size
+        entropy = -np.sum(probs * np.log2(probs))
+
+        entropy_values.append(entropy)
+
+    elapsed_time = time.time() - start_time
+    print(f"  Repeat-type entropy calculation time: {elapsed_time:.6f} seconds ({len(entropy_values)} windows)")
+
+    return positions, entropy_values
+
 input_file = "data/2191000generation.out.fa"
 repeat_len = 178
 window_size = 100
@@ -163,15 +220,23 @@ cd_positions_scaled = [pos * subsample_every for pos in cd_positions]
 print(f"\nMean correlation dimension (D2): {np.mean(cd_d2_values):.4f}")
 print(f"Std correlation dimension (D2): {np.std(cd_d2_values):.4f}")
 
+# Calculate repeat-type entropy
+print(f"\nCalculating repeat-type entropy...")
+rt_positions, rt_values = sliding_window_repeat_type_entropy(subsampled_repeats, window_size=100)
+rt_positions_scaled = [pos * subsample_every for pos in rt_positions]
+print(f"\nMean repeat-type entropy: {np.mean(rt_values):.4f}")
+print(f"Std repeat-type entropy: {np.std(rt_values):.4f}")
+
 # Align arrays by matching positions
 # k-mer positions start at window_size//2 due to centering
 # CD positions start at 0 due to zero-padding
 # We need to align them to the same x-axis
-print(f"\nAligning arrays: k-mer has {len(kmer_values)} windows, CD has {len(cd_d2_values)} windows")
+print(f"\nAligning arrays: k-mer has {len(kmer_values)} windows, CD has {len(cd_d2_values)} windows, RT has {len(rt_values)} windows")
 print(f"  k-mer first position: {kmer_positions_scaled[0]}, last: {kmer_positions_scaled[-1]}")
 print(f"  CD first position: {cd_positions_scaled[0]}, last: {cd_positions_scaled[-1]}")
+print(f"  RT first position: {rt_positions_scaled[0]}, last: {rt_positions_scaled[-1]}")
 
-# Use k-mer positions as reference, and extract CD values at matching positions
+# Use k-mer positions as reference, and extract CD and RT values at matching positions
 kmer_values_aligned = np.array(kmer_values)
 kmer_positions_aligned = np.array(kmer_positions_scaled)
 
@@ -187,51 +252,28 @@ for kpos in kmer_positions_aligned:
     cd_d2_values_aligned.append(cd_d2_values_list[idx])
 
 cd_d2_values_aligned = np.array(cd_d2_values_aligned)
+
+# Extract RT values at positions matching k-mer
+rt_values_list = list(rt_values)
+rt_positions_list = list(rt_positions_scaled)
+
+rt_values_aligned = []
+for kpos in kmer_positions_aligned:
+    # Find closest RT position
+    idx = min(range(len(rt_positions_list)), key=lambda i: abs(rt_positions_list[i] - kpos))
+    rt_values_aligned.append(rt_values_list[idx])
+
+rt_values_aligned = np.array(rt_values_aligned)
 print(f"  Aligned {len(kmer_values_aligned)} positions")
 
 # Create comparison plot
 print(f"\nCreating comparison plot...")
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 12))
+fig, ax = plt.subplots(1, 1, figsize=(14, 6))
 
-# Plot 1: k-mer Entropy
-ax1.plot(kmer_positions_scaled, kmer_values, color='g', linewidth=1.5, label='k-mer Entropy', alpha=0.8)
-ax1.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
-ax1.set_ylabel('k-mer Entropy (Normalized)', fontsize=12, fontweight='bold')
-ax1.set_title('k-mer Entropy', fontsize=12)
-ax1.legend(fontsize=10, loc='best')
-ax1.grid(True, alpha=0.3)
-ax1.set_xlim(0, n_repeats)
-
-# Add statistics text box
-stats_text = f'Mean: {np.mean(kmer_values):.4f}\nStd: {np.std(kmer_values):.4f}\nWindows: {len(kmer_values)}'
-ax1.text(0.98, 0.98, stats_text, transform=ax1.transAxes,
-        fontsize=10, verticalalignment='top', horizontalalignment='right',
-        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
-# Plot 2: Correlation Dimension (D2)
-ax2.plot(cd_positions_scaled, cd_d2_values, color='b', linewidth=1.5, label='Correlation Dimension (D2)', alpha=0.8)
-ax2.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
-ax2.set_ylabel('Correlation Dimension (D2)', fontsize=12, fontweight='bold')
-ax2.set_title('Correlation Dimension (D2)', fontsize=12)
-ax2.legend(fontsize=10, loc='best')
-ax2.grid(True, alpha=0.3)
-ax2.set_xlim(0, n_repeats)
-
-# Add statistics text box
-cd_stats_text = f'Mean: {np.mean(cd_d2_values):.4f}\nStd: {np.std(cd_d2_values):.4f}\nWindows: {len(cd_d2_values)}'
-ax2.text(0.98, 0.98, cd_stats_text, transform=ax2.transAxes,
-        fontsize=10, verticalalignment='top', horizontalalignment='right',
-        bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
-
-# Plot 3: Overlay comparison (normalized to 0-1 range) using aligned arrays
-# Debug: print ranges
-print(f"\nNormalization info:")
-print(f"  k-mer: min={np.min(kmer_values_aligned):.4f}, max={np.max(kmer_values_aligned):.4f}, range={np.max(kmer_values_aligned) - np.min(kmer_values_aligned):.4f}")
-print(f"  CD D2: min={np.min(cd_d2_values_aligned):.4f}, max={np.max(cd_d2_values_aligned):.4f}, range={np.max(cd_d2_values_aligned) - np.min(cd_d2_values_aligned):.4f}")
-
-# Handle edge case where range might be zero
+# Normalize metrics to 0-1 range
 kmer_range = np.max(kmer_values_aligned) - np.min(kmer_values_aligned)
 cd_range = np.max(cd_d2_values_aligned) - np.min(cd_d2_values_aligned)
+rt_range = np.max(rt_values_aligned) - np.min(rt_values_aligned)
 
 if kmer_range > 0:
     kmer_normalized = (kmer_values_aligned - np.min(kmer_values_aligned)) / kmer_range
@@ -243,23 +285,34 @@ if cd_range > 0:
 else:
     cd_normalized = np.zeros_like(cd_d2_values_aligned)
 
-ax3.plot(kmer_positions_aligned, kmer_normalized, color='g', linewidth=1.5, label='k-mer Entropy (normalized)', alpha=0.8)
-ax3.plot(kmer_positions_aligned, cd_normalized, color='b', linewidth=1.5, label='Correlation Dimension (normalized)', alpha=0.8)
-ax3.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
-ax3.set_ylabel('Normalized Complexity (0-1)', fontsize=12, fontweight='bold')
-ax3.set_title('Metric Comparison (Normalized)', fontsize=12)
-ax3.legend(fontsize=10, loc='best')
-ax3.grid(True, alpha=0.3)
-ax3.set_xlim(0, n_repeats)
+if rt_range > 0:
+    rt_normalized = (rt_values_aligned - np.min(rt_values_aligned)) / rt_range
+else:
+    rt_normalized = np.zeros_like(rt_values_aligned)
 
-# Calculate correlation between aligned metrics
-correlation = np.corrcoef(kmer_values_aligned, cd_d2_values_aligned)[0, 1]
-comp_stats_text = f'Correlation: {correlation:.4f}\nN windows: {len(kmer_values_aligned)}'
-ax3.text(0.98, 0.98, comp_stats_text, transform=ax3.transAxes,
+# Plot all methods
+ax.plot(kmer_positions_aligned, kmer_normalized, color='g', linewidth=1.5, label='k-mer Entropy', alpha=0.8)
+ax.plot(kmer_positions_aligned, cd_normalized, color='b', linewidth=1.5, label='Correlation Dimension', alpha=0.8)
+ax.plot(kmer_positions_aligned, rt_normalized, color='r', linewidth=1.5, label='Repeat-Type Entropy', alpha=0.8)
+
+ax.set_xlabel('Sequence Position (Repeat Index)', fontsize=12, fontweight='bold')
+ax.set_ylabel('Normalized Complexity (0-1)', fontsize=12, fontweight='bold')
+ax.set_title('All Methods Comparison (Normalized)', fontsize=13, fontweight='bold')
+ax.legend(fontsize=10, loc='best')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(0, n_repeats)
+
+# Calculate correlations
+correlation_kmer_cd = np.corrcoef(kmer_values_aligned, cd_d2_values_aligned)[0, 1]
+correlation_kmer_rt = np.corrcoef(kmer_values_aligned, rt_values_aligned)[0, 1]
+correlation_cd_rt = np.corrcoef(cd_d2_values_aligned, rt_values_aligned)[0, 1]
+
+comp_stats_text = f'Corr(k-mer, CD): {correlation_kmer_cd:.3f}\nCorr(k-mer, RT): {correlation_kmer_rt:.3f}\nCorr(CD, RT): {correlation_cd_rt:.3f}'
+ax.text(0.98, 0.98, comp_stats_text, transform=ax.transAxes,
         fontsize=10, verticalalignment='top', horizontalalignment='right',
         bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
 
-plt.tight_layout(h_pad=3.0)
+plt.tight_layout()
 
 # Save plot
 output_file = 'output/kmer_vs_cd_comparison.png'
@@ -269,7 +322,10 @@ print(f"Plot saved as {output_file}")
 
 plt.show()
 print(f"\nCompleted {input_file}")
-print(f"\nCorrelation between k-mer entropy and D2: {correlation:.4f}")
+print(f"\n=== Correlation Summary ===")
+print(f"Corr(k-mer, Correlation Dimension): {correlation_kmer_cd:.4f}")
+print(f"Corr(k-mer, Repeat-Type Entropy): {correlation_kmer_rt:.4f}")
+print(f"Corr(Correlation Dimension, Repeat-Type Entropy): {correlation_cd_rt:.4f}")
 
 #input_dir = os.listdir("output/fasta")
 #for f in input_dir[:100]:
