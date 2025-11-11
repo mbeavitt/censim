@@ -217,28 +217,57 @@ def sliding_window_kmer_entropy_variance(repeats, window_size=100, k=4):
 
     return positions, variance_values
 
-def sliding_window_hash_diversity(repeats, window_size=100):
+def sliding_window_hash_diversity(repeats, window_size=100, k=4):
     """
-    Calculate hash-based diversity within sliding windows.
+    Calculate all-pairwise Hamming distance between k-mer profiles within sliding windows.
 
-    Hashes each repeat and measures variance of hash values within windows.
-    Very fast but loses biological meaning.
+    Similar to repeat diversity (plot 3) but uses k-mer composition instead of full sequence.
+    Calculates mean pairwise Hamming distance between all k-mer profiles in each window.
 
     Args:
         repeats: list of repeat sequences
         window_size: number of repeats per window
+        k: k-mer size
 
     Returns:
         positions: center positions of windows
-        diversity_values: normalized variance of hash values
+        diversity_values: mean pairwise Hamming distance
     """
     start_time = time.time()
 
-    # Hash each repeat to a numeric value
-    repeat_hashes = np.array([hash(repeat) % (2**32) for repeat in repeats], dtype=np.float64)
+    # Generate all possible k-mers for DNA (4^k possibilities)
+    bases = ['A', 'C', 'G', 'T']
+    all_possible_kmers = []
 
-    # Normalize to 0-1 range for stability
-    repeat_hashes = (repeat_hashes - repeat_hashes.min()) / (repeat_hashes.max() - repeat_hashes.min())
+    def generate_kmers(prefix, k):
+        if k == 0:
+            all_possible_kmers.append(prefix)
+            return
+        for base in bases:
+            generate_kmers(prefix + base, k - 1)
+
+    generate_kmers('', k)
+    kmer_to_idx = {kmer: i for i, kmer in enumerate(all_possible_kmers)}
+    n_kmers_total = len(all_possible_kmers)
+
+    # Precompute all k-mer presence/absence as binary vectors
+    print(f"    Precomputing k-mer presence/absence for {len(repeats)} repeats...")
+    precompute_start = time.time()
+
+    profile_matrix = np.zeros((len(repeats), n_kmers_total), dtype=np.uint8)
+
+    for rep_idx, repeat in enumerate(repeats):
+        if len(repeat) < k:
+            continue
+        n_kmers = len(repeat) - k + 1  # Overlapping kmers
+        kmer_list = [repeat[i:i+k] for i in range(n_kmers)]
+
+        for kmer in kmer_list:
+            if kmer in kmer_to_idx:  # Only mark valid k-mers (all ACGT)
+                profile_matrix[rep_idx, kmer_to_idx[kmer]] = 1  # Mark as present
+
+    precompute_time = time.time() - precompute_start
+    print(f"    Precomputation took {precompute_time:.4f}s")
 
     N = len(repeats)
     positions = []
@@ -249,12 +278,23 @@ def sliding_window_hash_diversity(repeats, window_size=100):
         center = i + window_size // 2
         positions.append(center)
 
-        window_hashes = repeat_hashes[i:i+window_size]
-        variance = np.var(window_hashes)
-        diversity_values.append(variance)
+        # Get binary profile vectors for this window
+        window_profiles = profile_matrix[i:i+window_size]
+
+        # Calculate all pairwise Hamming distances
+        # For each pair (j, k), Hamming distance = number of positions where bits differ
+        pairwise_distances = []
+        for j in range(window_size):
+            for k in range(j + 1, window_size):
+                hamming_dist = np.sum(window_profiles[j] != window_profiles[k])
+                pairwise_distances.append(hamming_dist)
+
+        # Average pairwise distance, normalized by total number of k-mers
+        avg_distance = np.mean(pairwise_distances) / n_kmers_total if pairwise_distances else 0.0
+        diversity_values.append(avg_distance)
 
     elapsed_time = time.time() - start_time
-    print(f"  Hash diversity calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
+    print(f"  K-mer pairwise Hamming distance calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
 
     return positions, diversity_values
 
@@ -337,6 +377,99 @@ def sliding_window_kmer_profile_distance(repeats, window_size=100, k=4):
 
     return positions, diversity_values
 
+def sliding_window_kmer_profile_mode_distance(repeats, window_size=100, k=4):
+    """
+    Calculate sum of Hamming distances from the most common k-mer profile.
+
+    Keeps the matrix as binary (uint8) and finds the most common exact profile
+    in each window, then computes the sum of Hamming distances from this mode.
+
+    Args:
+        repeats: list of repeat sequences
+        window_size: number of repeats per window
+        k: k-mer size
+
+    Returns:
+        positions: center positions of windows
+        diversity_values: sum of Hamming distances from mode
+    """
+    start_time = time.time()
+
+    # Generate all possible k-mers for DNA (4^k possibilities)
+    bases = ['A', 'C', 'G', 'T']
+    all_possible_kmers = []
+
+    def generate_kmers(prefix, k):
+        if k == 0:
+            all_possible_kmers.append(prefix)
+            return
+        for base in bases:
+            generate_kmers(prefix + base, k - 1)
+
+    generate_kmers('', k)
+    kmer_to_idx = {kmer: i for i, kmer in enumerate(all_possible_kmers)}
+    n_kmers_total = len(all_possible_kmers)
+
+    # Precompute all k-mer presence/absence as binary vectors
+    print(f"    Precomputing k-mer presence/absence for {len(repeats)} repeats...")
+    precompute_start = time.time()
+
+    # Use uint8 to store binary (0 or 1) - keep as binary throughout
+    profile_matrix = np.zeros((len(repeats), n_kmers_total), dtype=np.uint8)
+
+    for rep_idx, repeat in enumerate(repeats):
+        if len(repeat) < k:
+            continue
+        n_kmers = len(repeat) - k + 1  # Overlapping kmers
+        kmer_list = [repeat[i:i+k] for i in range(n_kmers)]
+
+        for kmer in kmer_list:
+            if kmer in kmer_to_idx:  # Only mark valid k-mers (all ACGT)
+                profile_matrix[rep_idx, kmer_to_idx[kmer]] = 1  # Mark as present
+
+    precompute_time = time.time() - precompute_start
+    print(f"    Precomputation took {precompute_time:.4f}s")
+
+    N = len(repeats)
+    positions = []
+    diversity_values = []
+
+    # Sliding window - keep everything as binary
+    for i in range(0, N - window_size + 1, 1):
+        center = i + window_size // 2
+        positions.append(center)
+
+        # Get binary profile vectors for this window (keep as uint8)
+        window_profiles = profile_matrix[i:i+window_size]
+
+        # Find the most common profile (mode)
+        # Convert each row to a tuple so we can count occurrences
+        profile_tuples = [tuple(row) for row in window_profiles]
+
+        # Count occurrences of each unique profile
+        from collections import Counter
+        profile_counts = Counter(profile_tuples)
+
+        # Get the most common profile
+        mode_profile_tuple = profile_counts.most_common(1)[0][0]
+        mode_profile = np.array(mode_profile_tuple, dtype=np.uint8)
+
+        # Calculate Hamming distance from mode for each profile
+        # Hamming distance = number of positions where bits differ
+        hamming_distances = np.sum(window_profiles != mode_profile, axis=1)
+
+        # Sum of all Hamming distances (can normalize if desired)
+        total_distance = np.sum(hamming_distances)
+
+        # Normalize by window size and number of k-mers for comparability
+        normalized_distance = float(total_distance) / (window_size * n_kmers_total)
+        diversity_values.append(normalized_distance)
+
+    elapsed_time = time.time() - start_time
+    print(f"  K-mer profile mode distance calculation time: {elapsed_time:.6f} seconds ({len(diversity_values)} windows)")
+
+    return positions, diversity_values
+
 input_file = "data/2191000generation.out.fa"
 repeat_len = 178
 window_size = 100
@@ -379,19 +512,19 @@ rd_positions_scaled = [pos * subsample_every for pos in rd_positions]
 print(f"  Mean repeat diversity: {np.mean(rd_values):.4f}")
 print(f"  Std repeat diversity: {np.std(rd_values):.4f}")
 
-# Calculate k-mer entropy variance
-print(f"\nCalculating k-mer entropy variance...")
-kev_positions, kev_values = sliding_window_kmer_entropy_variance(subsampled_repeats, window_size=100, k=4)
-kev_positions_scaled = [pos * subsample_every for pos in kev_positions]
-print(f"  Mean k-mer entropy variance: {np.mean(kev_values):.4f}")
-print(f"  Std k-mer entropy variance: {np.std(kev_values):.4f}")
+# Calculate k-mer profile mode distance
+print(f"\nCalculating k-mer profile mode distance...")
+kpmd_positions, kpmd_values = sliding_window_kmer_profile_mode_distance(subsampled_repeats, window_size=100, k=4)
+kpmd_positions_scaled = [pos * subsample_every for pos in kpmd_positions]
+print(f"  Mean k-mer profile mode distance: {np.mean(kpmd_values):.4f}")
+print(f"  Std k-mer profile mode distance: {np.std(kpmd_values):.4f}")
 
-# Calculate hash diversity
-print(f"\nCalculating hash diversity...")
-hd_positions, hd_values = sliding_window_hash_diversity(subsampled_repeats, window_size=100)
+# Calculate k-mer pairwise Hamming distance
+print(f"\nCalculating k-mer pairwise Hamming distance...")
+hd_positions, hd_values = sliding_window_hash_diversity(subsampled_repeats, window_size=100, k=4)
 hd_positions_scaled = [pos * subsample_every for pos in hd_positions]
-print(f"  Mean hash diversity: {np.mean(hd_values):.4f}")
-print(f"  Std hash diversity: {np.std(hd_values):.4f}")
+print(f"  Mean k-mer pairwise Hamming distance: {np.mean(hd_values):.4f}")
+print(f"  Std k-mer pairwise Hamming distance: {np.std(hd_values):.4f}")
 
 # Calculate k-mer profile distance
 print(f"\nCalculating k-mer profile distance...")
@@ -428,7 +561,7 @@ cd_d2_values_aligned = np.array(cd_d2_values_aligned)
 
 # Extract all new metrics at positions matching k-mer
 rd_values_aligned = []
-kev_values_aligned = []
+kpmd_values_aligned = []
 hd_values_aligned = []
 kpd_values_aligned = []
 
@@ -437,9 +570,9 @@ for kpos in kmer_positions_aligned:
     idx = min(range(len(rd_positions_scaled)), key=lambda i: abs(rd_positions_scaled[i] - kpos))
     rd_values_aligned.append(rd_values[idx])
 
-    # K-mer Entropy Variance
-    idx = min(range(len(kev_positions_scaled)), key=lambda i: abs(kev_positions_scaled[i] - kpos))
-    kev_values_aligned.append(kev_values[idx])
+    # K-mer Profile Mode Distance
+    idx = min(range(len(kpmd_positions_scaled)), key=lambda i: abs(kpmd_positions_scaled[i] - kpos))
+    kpmd_values_aligned.append(kpmd_values[idx])
 
     # Hash Diversity
     idx = min(range(len(hd_positions_scaled)), key=lambda i: abs(hd_positions_scaled[i] - kpos))
@@ -450,7 +583,7 @@ for kpos in kmer_positions_aligned:
     kpd_values_aligned.append(kpd_values[idx])
 
 rd_values_aligned = np.array(rd_values_aligned)
-kev_values_aligned = np.array(kev_values_aligned)
+kpmd_values_aligned = np.array(kpmd_values_aligned)
 hd_values_aligned = np.array(hd_values_aligned)
 kpd_values_aligned = np.array(kpd_values_aligned)
 
@@ -492,19 +625,19 @@ ax3.set_title('Repeat Diversity (w/ identity matrix)', fontsize=11, fontweight='
 ax3.grid(True, alpha=0.3)
 ax3.set_xlim(0, n_repeats)
 
-# Plot 4: K-mer Entropy Variance
-ax4.plot(kmer_positions_aligned, normalize(kev_values_aligned), color='purple', linewidth=1.5)
+# Plot 4: K-mer Profile Mode Distance
+ax4.plot(kmer_positions_aligned, normalize(kpmd_values_aligned), color='purple', linewidth=1.5)
 ax4.set_xlabel('Repeat Index', fontsize=10)
 ax4.set_ylabel('Normalized Value', fontsize=10)
-ax4.set_title('K-mer Entropy Variance', fontsize=11, fontweight='bold')
+ax4.set_title('K-mer Profile Mode Distance', fontsize=11, fontweight='bold')
 ax4.grid(True, alpha=0.3)
 ax4.set_xlim(0, n_repeats)
 
-# Plot 5: Hash Diversity
+# Plot 5: K-mer Pairwise Hamming Distance
 ax5.plot(kmer_positions_aligned, normalize(hd_values_aligned), color='orange', linewidth=1.5)
 ax5.set_xlabel('Repeat Index', fontsize=10)
 ax5.set_ylabel('Normalized Value', fontsize=10)
-ax5.set_title('Hash Diversity', fontsize=11, fontweight='bold')
+ax5.set_title('K-mer Pairwise Hamming Distance', fontsize=11, fontweight='bold')
 ax5.grid(True, alpha=0.3)
 ax5.set_xlim(0, n_repeats)
 
@@ -531,8 +664,8 @@ print(f"All 6 metrics plotted:")
 print(f"  1. k-mer Entropy (baseline)")
 print(f"  2. Correlation Dimension (D2) - uses identity matrix")
 print(f"  3. Repeat Diversity - uses identity matrix")
-print(f"  4. K-mer Entropy Variance - NO identity matrix")
-print(f"  5. Hash Diversity - NO identity matrix")
+print(f"  4. K-mer Profile Mode Distance - NO identity matrix, uses mode + Hamming")
+print(f"  5. K-mer Pairwise Hamming Distance - NO identity matrix, all-pairwise comparison")
 print(f"  6. K-mer Profile Distance - NO identity matrix")
 
 #input_dir = os.listdir("output/fasta")
