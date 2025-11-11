@@ -16,6 +16,14 @@ build/
 dist/
 *.egg-info/
 
+# Compiled C libraries
+*.so
+*.dylib
+*.dll
+*.o
+*.a
+src/censim/kmer_c/main
+
 # Editor files
 *.swp
 *.swo

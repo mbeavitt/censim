@@ -1,11 +1,6 @@
 import random
 import numpy as np
-from .identity import all_vs_all_identity_numba
-from .correlation_dimension import (
-    hamming_distance_matrix,
-    sliding_window_local_correlation,
-    estimate_D2_from_C_r_batch
-)
+from .kmer_wrapper import analyze_repeat_sequence
 
 class RepeatSequence:
     """Store sequence as a list of repeat units for efficient insertions/deletions.
@@ -355,49 +350,34 @@ def initialize_cenh3_occupancy(num_units):
     return cenh3_occupancy
 
 def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_radii=50, window_size=100):
-    """Compute correlation dimension (D2) values from a RepeatSequence object or string.
+    """Compute k-mer diversity values from a RepeatSequence object using fast C implementation.
+
+    This function now uses the optimized C implementation for computing sliding window
+    diversity based on k-mer presence/absence Hamming distances.
 
     Args:
         seq: RepeatSequence object or string sequence
         repeat_len: Length of each repeat unit (default: 178)
-        r_min: Minimum radius value (default: 0.01)
-        r_max: Maximum radius value (default: 0.5)
-        n_radii: Number of radius values (default: 50)
+        r_min: Minimum radius value (unused, kept for API compatibility)
+        r_max: Maximum radius value (unused, kept for API compatibility)
+        n_radii: Number of radius values (unused, kept for API compatibility)
         window_size: Sliding window size (default: 100)
 
     Returns:
-        np.array: D2 values at each window position
+        np.array: Diversity values at each window position
     """
-    # Convert RepeatSequence to string if needed
+    # Convert string to RepeatSequence if needed
     if isinstance(seq, str):
-        mutated_sequence = seq
-    else:
-        mutated_sequence = seq.to_string()
+        seq = RepeatSequence(seq, repeat_size=repeat_len)
 
-    # Parse sequence into repeats
-    n_repeats = len(mutated_sequence) // repeat_len
-    repeats = [mutated_sequence[i*repeat_len:(i+1)*repeat_len] for i in range(n_repeats)]
-
-    # Compute identity matrix with subsampling (using optimized numba version)
-    identity_matrix = all_vs_all_identity_numba(repeats, scale_factor=30, max_exact_size=1000)
-
-    # Convert to distance matrix
-    D = hamming_distance_matrix(identity_matrix)
-
-    # Choose radii
-    r_values = np.linspace(r_min, r_max, n_radii)
-
-    # Compute sliding window local correlation
-    positions, mean_corr = sliding_window_local_correlation(
-        D, window_size, r_values
+    # Use C implementation for fast k-mer diversity computation
+    positions, diversity = analyze_repeat_sequence(
+        seq,
+        window_size=window_size,
+        method="consecutive"
     )
 
-    # Compute D2 values at each window position using vectorized batch processing
-    # Pre-compute log(r_values) once for performance
-    log_r_values = np.log(r_values)
-    d_values = estimate_D2_from_C_r_batch(r_values, mean_corr, log_r=log_r_values)
-
-    return d_values
+    return diversity
 
 
 def introduce_mutations(sequence, generation, num_generations, repeat_size=178, compute_correlation_dim=True, use_d2_bias=False, d2_bias_strength=1.0):

@@ -43,14 +43,15 @@ def main():
 
     # Read initial sequence
     current_sequence = read_sequence(input_sequence_file)
+    chunk_len = 100
 
-    # Run simulation for specified generations in 1000-generation chunks
-    for generation in range(1000, args.max_generations + 1, 1000):
+    # Run simulation for specified generations in chunk_len-generation chunks
+    for generation in range(chunk_len, args.max_generations + 1, chunk_len):
         print(f"[{generation:>7}/{args.max_generations}] Running simulation...", end=" ")
 
-        # Run 1000 generations of mutation
+        # Run chunk_len generations of mutation
         mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest = introduce_mutations(
-            current_sequence, generation - 1000, 1000,
+            current_sequence, generation - chunk_len, chunk_len,
             compute_correlation_dim=not args.no_correlation_dimension,
             use_d2_bias=args.d2_bias,
             d2_bias_strength=args.d2_bias_strength
