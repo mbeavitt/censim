@@ -16,21 +16,14 @@ def main():
                         help="Input sequence file (.seq)")
     parser.add_argument("--output-dir", "-o", default="./output",
                         help="Output directory (default: ./output)")
-    parser.add_argument("--no-correlation-dimension", action="store_true",
-                        help="Disable correlation dimension calculations (faster)")
     parser.add_argument("--d2-bias", action="store_true",
-                        help="Bias insertion locations toward high D2 regions")
+                        help="Bias insertion locations toward high D2 regions (automatically enables correlation dimension calculations)")
     parser.add_argument("--d2-bias-strength", type=float, default=1.0,
                         help="Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)")
     parser.add_argument("--max-generations", type=int, default=6000000,
                         help="Maximum generations to run (default: 6000000)")
 
     args = parser.parse_args()
-
-    # Validation: D2 bias requires CD computation
-    if args.d2_bias:
-        if args.no_correlation_dimension:
-            parser.error("--d2-bias requires correlation dimension calculation (don't use --no-correlation-dimension)")
 
     # Create output directories
     output_base = Path(args.output_dir)
@@ -51,7 +44,6 @@ def main():
         # Run 1000 generations of mutation
         mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest = introduce_mutations(
             current_sequence, generation - 1000, 1000,
-            compute_correlation_dim=not args.no_correlation_dimension,
             use_d2_bias=args.d2_bias,
             d2_bias_strength=args.d2_bias_strength
         )

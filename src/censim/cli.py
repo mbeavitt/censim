@@ -32,12 +32,8 @@ def main():
         help="Save output every N generations"
     )
     parser.add_argument(
-        "--no-correlation-dimension", action="store_true",
-        help="Disable correlation dimension calculations (much faster)"
-    )
-    parser.add_argument(
         "--d2-bias", action="store_true",
-        help="Bias insertion locations toward high D2 regions"
+        help="Bias insertion locations toward high D2 regions (automatically enables correlation dimension calculations)"
     )
     parser.add_argument(
         "--d2-bias-strength", type=float, default=1.0,
@@ -45,10 +41,6 @@ def main():
     )
 
     args = parser.parse_args()
-
-    # Validation
-    if args.d2_bias and args.no_correlation_dimension:
-        parser.error("--d2-bias requires correlation dimension calculation (cannot use --no-correlation-dimension)")
 
     # Create output directories
     output_base = Path(args.output_dir)
@@ -75,7 +67,6 @@ def main():
             current_sequence,
             generation - args.checkpoint_interval,
             args.checkpoint_interval,
-            compute_correlation_dim=not args.no_correlation_dimension,
             use_d2_bias=args.d2_bias,
             d2_bias_strength=args.d2_bias_strength
         )

@@ -400,7 +400,7 @@ def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_
     return d_values
 
 
-def introduce_mutations(sequence, generation, num_generations, repeat_size=178, compute_correlation_dim=True, use_d2_bias=False, d2_bias_strength=1.0):
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178, use_d2_bias=False, d2_bias_strength=1.0):
     """Introduce mutations into sequence over multiple generations.
 
     Args:
@@ -408,15 +408,14 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         generation: Starting generation number
         num_generations: Number of generations to simulate
         repeat_size: Size of each repeat unit in bp (default: 178)
-        compute_correlation_dim: Whether to compute correlation dimension (default: True)
         use_d2_bias: Whether to bias insertion locations by D2 values (default: False)
         d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
 
     Returns:
         tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest)
             where collapsed is True if the array collapsed to zero, False otherwise
-            d_values_history is a list of d_values arrays for each generation (empty if compute_correlation_dim=False)
-            d_values_latest is the most recent d_values array (or None if compute_correlation_dim=False)
+            d_values_history is a list of d_values arrays for each generation (empty if use_d2_bias=False)
+            d_values_latest is the most recent d_values array (or None if use_d2_bias=False)
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
@@ -448,8 +447,8 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
             d2_bias_strength=d2_bias_strength
         )
 
-        # Compute correlation dimension if enabled
-        if compute_correlation_dim:
+        # Compute correlation dimension if d2_bias is enabled
+        if use_d2_bias:
             d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size)
             d_values_history.append(d_values_latest)
 
