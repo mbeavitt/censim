@@ -284,15 +284,19 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
                 weights = weights / np.sum(weights)  # Renormalize
                 cached_num_repeats = num_repeats
 
+        indel_type = random.choice(["DUP", "DEL"])
+
         # Pick a repeat unit based on D2-weighted probability, then convert to base position
         if weights is not None:
-            repeat_idx = np.random.choice(num_repeats, p=weights)
+            if indel_type == "DUP":
+                repeat_idx = np.random.choice(num_repeats, p=weights)
+            else:
+                repeat_idx = np.random.choice(num_repeats)
             char_start = repeat_idx * repeat_size
         else:
             # Uniform random position (original behavior)
             char_start = random.randint(0, seq_length - 1)
 
-        indel_type = random.choice(["DUP", "DEL"])
 
         # Sample indel size in base pairs from Poisson distribution
         # Size is always in multiples of repeat_size to maintain frame

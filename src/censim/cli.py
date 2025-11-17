@@ -20,12 +20,16 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
+        "--resume-from",
+        help="Resume from a previous checkpoint FASTA file (e.g., ./data/2191000generation.out.fa)"
+    )
+    parser.add_argument(
         "--monomer", "-m",
-        help="Custom monomer sequence to use (overrides default 178bp sequence)"
+        help="Custom monomer sequence to use (overrides default 178bp sequence, ignored if --resume-from is set)"
     )
     parser.add_argument(
         "--copies", "-c", type=int, default=15000,
-        help="Number of monomer copies to start with"
+        help="Number of monomer copies to start with (ignored if --resume-from is set)"
     )
     parser.add_argument(
         "--output-dir", "-o", default="./output",
@@ -88,29 +92,50 @@ def main():
         )
         print(f"Video output: {video_path} ({args.video_fps} fps)")
 
-    # Generate initial sequence
-    monomer = args.monomer if args.monomer else DEFAULT_MONOMER
+    # Generate or load initial sequence
     repeat_size = 178
+    start_generation = 0
 
-    # Repeat or truncate monomer to fill 178bp
-    if len(monomer) < repeat_size:
-        # Repeat short monomer to fill 178bp
-        repeats_needed = (repeat_size + len(monomer) - 1) // len(monomer)
-        full_unit = (monomer * repeats_needed)[:repeat_size]
+    if args.resume_from:
+        # Load sequence from FASTA file
+        import re
+        print(f"Resuming from {args.resume_from}")
+        with open(args.resume_from, 'r') as f:
+            lines = f.readlines()
+            # First line is header, extract generation if present
+            header = lines[0].strip()
+            gen_match = re.search(r'(\d+)gen', header)
+            if gen_match:
+                start_generation = int(gen_match.group(1))
+            # Rest is sequence
+            current_sequence = ''.join(line.strip() for line in lines[1:])
+
+        n_copies = len(current_sequence) // repeat_size
+        print(f"Loaded sequence: {len(current_sequence):,} bp ({n_copies:,} copies)")
+        print(f"Starting from generation {start_generation:,}")
     else:
-        # Truncate long monomer to 178bp
-        full_unit = monomer[:repeat_size]
+        # Generate sequence from monomer
+        monomer = args.monomer if args.monomer else DEFAULT_MONOMER
 
-    current_sequence = full_unit * args.copies
-    print(f"Starting with {args.copies:,} copies of 178bp monomer")
-    if len(monomer) != repeat_size:
-        print(f"(Base monomer: {len(monomer)}bp -> repeated/truncated to {repeat_size}bp)")
-    print(f"Total sequence length: {len(current_sequence):,} bp")
+        # Repeat or truncate monomer to fill 178bp
+        if len(monomer) < repeat_size:
+            # Repeat short monomer to fill 178bp
+            repeats_needed = (repeat_size + len(monomer) - 1) // len(monomer)
+            full_unit = (monomer * repeats_needed)[:repeat_size]
+        else:
+            # Truncate long monomer to 178bp
+            full_unit = monomer[:repeat_size]
+
+        current_sequence = full_unit * args.copies
+        print(f"Starting with {args.copies:,} copies of 178bp monomer")
+        if len(monomer) != repeat_size:
+            print(f"(Base monomer: {len(monomer)}bp -> repeated/truncated to {repeat_size}bp)")
+        print(f"Total sequence length: {len(current_sequence):,} bp")
 
     # Run simulation
     collapsed = False
     for generation in range(
-        args.checkpoint_interval,
+        start_generation + args.checkpoint_interval,
         args.max_generations + 1,
         args.checkpoint_interval
     ):
