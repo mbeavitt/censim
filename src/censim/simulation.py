@@ -426,15 +426,13 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         invert_d2: If True, use 1-diversity for D2; if False, use raw diversity (default: True)
 
     Returns:
-        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest)
+        tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_latest)
             where collapsed is True if the array collapsed to zero, False otherwise
-            d_values_history is a list of d_values arrays for each generation (empty if use_d2_bias=False)
             d_values_latest is the most recent d_values array (or None if use_d2_bias=False)
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
     records = []
-    d_values_history = []
 
     # Initialize CENH3 occupancy based on initial sequence length
     num_units = len(sequence) // repeat_size
@@ -464,11 +462,10 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         # Compute correlation dimension if d2_bias is enabled
         if use_d2_bias:
             d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size, invert=invert_d2)
-            d_values_history.append(d_values_latest)
 
         if collapsed:
             print("Simulation complete: Array collapsed to zero")
             break
 
-    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_history, d_values_latest
+    return seq.to_string(), records, cenh3_occupancy, collapsed, d_values_latest
 

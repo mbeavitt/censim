@@ -59,14 +59,6 @@ def main():
         "--plots", action="store_true",
         help="Generate plots at each checkpoint (default: False)"
     )
-    parser.add_argument(
-        "--video", action="store_true",
-        help="Create video from plots (saves space vs individual images)"
-    )
-    parser.add_argument(
-        "--video-fps", type=int, default=10,
-        help="Frames per second for video output (default: 10)"
-    )
 
     args = parser.parse_args()
 
@@ -75,22 +67,8 @@ def main():
     os.makedirs(output_base / "fasta", exist_ok=True)
     os.makedirs(output_base / "records", exist_ok=True)
     os.makedirs(output_base / "cenh3", exist_ok=True)
-    if args.plots and not args.video:
+    if args.plots:
         os.makedirs(output_base / "plots", exist_ok=True)
-
-    # Initialize video writer if requested
-    video_writer = None
-    if args.video:
-        import imageio
-        video_path = output_base / "simulation.mp4"
-        video_writer = imageio.get_writer(
-            str(video_path),
-            fps=args.video_fps,
-            codec='libx264',
-            quality=8,  # 1-10, higher is better
-            pixelformat='yuv420p'
-        )
-        print(f"Video output: {video_path} ({args.video_fps} fps)")
 
     # Generate or load initial sequence
     repeat_size = 178
@@ -142,7 +120,7 @@ def main():
         print(f"[{generation:>7}/{args.max_generations}] Running simulation...", end=" ", flush=True)
 
         # Run checkpoint_interval generations of mutation
-        mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest = introduce_mutations(
+        mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_latest = introduce_mutations(
             current_sequence,
             generation - args.checkpoint_interval,
             args.checkpoint_interval,
@@ -173,7 +151,7 @@ def main():
                 f.write(f"{idx}\t{1 if occupied else 0}\n")
 
         # Generate plot if enabled
-        if args.plots or args.video:
+        if args.plots:
             from censim.simulation import compute_correlation_dimension
             import numpy as np
 
@@ -186,26 +164,15 @@ def main():
                     invert=not args.inverted_d
                 )
 
-            if args.video:
-                # Generate frame and add to video
-                frame = plot_similarity_and_kmer(
-                    mutated_sequence,
-                    repeat_size,
-                    d_values_latest,
-                    generation,
-                    return_frame=True
-                )
-                video_writer.append_data(frame)
-            else:
-                # Save individual plot image
-                plot_output = output_base / "plots" / f"{generation}generation.jpg"
-                plot_similarity_and_kmer(
-                    mutated_sequence,
-                    repeat_size,
-                    d_values_latest,
-                    generation,
-                    str(plot_output)
-                )
+            # Save individual plot image
+            plot_output = output_base / "plots" / f"{generation}generation.jpg"
+            plot_similarity_and_kmer(
+                mutated_sequence,
+                repeat_size,
+                d_values_latest,
+                generation,
+                str(plot_output)
+            )
 
         print("done")
 
@@ -219,11 +186,6 @@ def main():
 
     if not collapsed:
         print(f"\nSimulation completed: {generation:,} generations")
-
-    # Close video writer if it was used
-    if video_writer is not None:
-        video_writer.close()
-        print(f"\nVideo saved: {video_path}")
 
 
 if __name__ == "__main__":
