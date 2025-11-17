@@ -14,7 +14,7 @@ from censim.correlation_dimension import hamming_distance_matrix
 
 def plot_similarity_and_kmer(sequence, repeat_len, d_values, generation,
                              output_file=None, scale_factor=30, max_exact_size=1000,
-                             image_format='jpeg', jpeg_quality=85, return_frame=False):
+                             image_format='jpeg', jpeg_quality=85):
     """
     Create a plot with rotated distance matrix on top and kmer similarity index below.
 
@@ -23,7 +23,7 @@ def plot_similarity_and_kmer(sequence, repeat_len, d_values, generation,
         repeat_len: Length of repeat units (typically 178bp)
         d_values: Array of kmer similarity (D2) values at each position
         generation: Generation number to display
-        output_file: Output filename
+        output_file: Output filename (required)
         scale_factor: Subsampling factor for identity matrix (default: 30)
         max_exact_size: Maximum size for exact computation (default: 1000)
         image_format: Output format - 'png', 'jpeg', or 'webp' (default: 'jpeg')
@@ -105,18 +105,7 @@ def plot_similarity_and_kmer(sequence, repeat_len, d_values, generation,
 
     plt.tight_layout(pad=0.5)
 
-    # Return frame as numpy array for video encoding
-    if return_frame:
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150, bbox_inches=None)
-        buf.seek(0)
-        img = Image.open(buf)
-        frame = np.array(img)
-        plt.close()
-        buf.close()
-        return frame
-
-    # Save to file if output_file is specified
+    # Save to file
     if output_file:
         save_kwargs = {'dpi': 150, 'bbox_inches': None}
 
@@ -131,4 +120,5 @@ def plot_similarity_and_kmer(sequence, repeat_len, d_values, generation,
 
         plt.savefig(output_file, **save_kwargs)
 
-    plt.close()
+    # Close the figure to free memory
+    plt.close(fig)
