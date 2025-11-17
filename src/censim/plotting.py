@@ -2,11 +2,9 @@
 Simplified plotting functions for centromere simulation visualization.
 """
 
-import io
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import rotate
-from PIL import Image
 
 from censim.identity import all_vs_all_identity_scipy
 from censim.correlation_dimension import hamming_distance_matrix
