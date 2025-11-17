@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 
 from censim.simulation import read_sequence, introduce_mutations
+from censim.plotting import plot_similarity_and_kmer
+
+# Default 178bp centromeric monomer sequence
+DEFAULT_MONOMER = "AGTATAAGAACTTAAACCGCAACCCGATCTTAAAAGCCTAAGTAGTGTTTCCTTGTTAGAAGACACAAAGCCAAAGACTCATATGGACTTTGGCTACACCATGAAAGCTTTGAGAAGCAAGAAGAAGGTTGGTTAGTGTTTTGGAGTCGAATATGACTTGATGTCATGTGTATGATTG"
 
 
 def main():
@@ -16,8 +20,12 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
-        "--sequence-file", "-s", required=True,
-        help="Input sequence file (.seq)"
+        "--monomer", "-m",
+        help="Custom monomer sequence to use (overrides default 178bp sequence)"
+    )
+    parser.add_argument(
+        "--copies", "-c", type=int, default=15000,
+        help="Number of monomer copies to start with"
     )
     parser.add_argument(
         "--output-dir", "-o", default="./output",
@@ -39,6 +47,22 @@ def main():
         "--d2-bias-strength", type=float, default=1.0,
         help="Strength of D2 bias (0=uniform, 1=linear, >1=stronger)"
     )
+    parser.add_argument(
+        "--inverted-d", action="store_true",
+        help="Use raw diversity values instead of inverted D2 (default: False, uses 1-diversity)"
+    )
+    parser.add_argument(
+        "--plots", action="store_true",
+        help="Generate plots at each checkpoint (default: False)"
+    )
+    parser.add_argument(
+        "--video", action="store_true",
+        help="Create video from plots (saves space vs individual images)"
+    )
+    parser.add_argument(
+        "--video-fps", type=int, default=10,
+        help="Frames per second for video output (default: 10)"
+    )
 
     args = parser.parse_args()
 
@@ -47,11 +71,41 @@ def main():
     os.makedirs(output_base / "fasta", exist_ok=True)
     os.makedirs(output_base / "records", exist_ok=True)
     os.makedirs(output_base / "cenh3", exist_ok=True)
+    if args.plots and not args.video:
+        os.makedirs(output_base / "plots", exist_ok=True)
 
-    # Read initial sequence
-    print(f"Reading sequence from {args.sequence_file}")
-    current_sequence = read_sequence(args.sequence_file)
-    print(f"Sequence loaded: {len(current_sequence):,} bp")
+    # Initialize video writer if requested
+    video_writer = None
+    if args.video:
+        import imageio
+        video_path = output_base / "simulation.mp4"
+        video_writer = imageio.get_writer(
+            str(video_path),
+            fps=args.video_fps,
+            codec='libx264',
+            quality=8,  # 1-10, higher is better
+            pixelformat='yuv420p'
+        )
+        print(f"Video output: {video_path} ({args.video_fps} fps)")
+
+    # Generate initial sequence
+    monomer = args.monomer if args.monomer else DEFAULT_MONOMER
+    repeat_size = 178
+
+    # Repeat or truncate monomer to fill 178bp
+    if len(monomer) < repeat_size:
+        # Repeat short monomer to fill 178bp
+        repeats_needed = (repeat_size + len(monomer) - 1) // len(monomer)
+        full_unit = (monomer * repeats_needed)[:repeat_size]
+    else:
+        # Truncate long monomer to 178bp
+        full_unit = monomer[:repeat_size]
+
+    current_sequence = full_unit * args.copies
+    print(f"Starting with {args.copies:,} copies of 178bp monomer")
+    if len(monomer) != repeat_size:
+        print(f"(Base monomer: {len(monomer)}bp -> repeated/truncated to {repeat_size}bp)")
+    print(f"Total sequence length: {len(current_sequence):,} bp")
 
     # Run simulation
     collapsed = False
@@ -68,13 +122,14 @@ def main():
             generation - args.checkpoint_interval,
             args.checkpoint_interval,
             use_d2_bias=args.d2_bias,
-            d2_bias_strength=args.d2_bias_strength
+            d2_bias_strength=args.d2_bias_strength,
+            invert_d2=not args.inverted_d  # Flag set = use raw diversity (invert=False)
         )
 
         # Write output files
-        fasta_output = output_base / "fasta" / f"{generation:07d}generation.out.fa"
-        record_output = output_base / "records" / f"{generation:07d}generation.record.txt"
-        cenh3_output = output_base / "cenh3" / f"{generation:07d}generation.cenh3.txt"
+        fasta_output = output_base / "fasta" / f"{generation}generation.out.fa"
+        record_output = output_base / "records" / f"{generation}generation.record.txt"
+        cenh3_output = output_base / "cenh3" / f"{generation}generation.cenh3.txt"
 
         # Write FASTA file with header
         with open(fasta_output, "w") as f:
@@ -92,6 +147,41 @@ def main():
             for idx, occupied in enumerate(cenh3_occupancy):
                 f.write(f"{idx}\t{1 if occupied else 0}\n")
 
+        # Generate plot if enabled
+        if args.plots or args.video:
+            from censim.simulation import compute_correlation_dimension
+            import numpy as np
+
+            # Compute d_values if not already available (with same subsampling as will be used for matrix)
+            if d_values_latest is None:
+                d_values_latest = compute_correlation_dimension(
+                    mutated_sequence,
+                    repeat_len=repeat_size,
+                    scale_factor=30,  # Match the subsampling in plotting
+                    invert=not args.inverted_d
+                )
+
+            if args.video:
+                # Generate frame and add to video
+                frame = plot_similarity_and_kmer(
+                    mutated_sequence,
+                    repeat_size,
+                    d_values_latest,
+                    generation,
+                    return_frame=True
+                )
+                video_writer.append_data(frame)
+            else:
+                # Save individual plot image
+                plot_output = output_base / "plots" / f"{generation}generation.jpg"
+                plot_similarity_and_kmer(
+                    mutated_sequence,
+                    repeat_size,
+                    d_values_latest,
+                    generation,
+                    str(plot_output)
+                )
+
         print("done")
 
         # Check for collapse
@@ -104,6 +194,11 @@ def main():
 
     if not collapsed:
         print(f"\nSimulation completed: {generation:,} generations")
+
+    # Close video writer if it was used
+    if video_writer is not None:
+        video_writer.close()
+        print(f"\nVideo saved: {video_path}")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,7 @@
 import random
 import numpy as np
-from .identity import all_vs_all_identity_numba
-from .correlation_dimension import (
-    hamming_distance_matrix,
-    sliding_window_local_correlation,
-    estimate_D2_from_C_r_batch
-)
+import math
+from kmer_variance import calculate_diversity
 
 class RepeatSequence:
     """Store sequence as a list of repeat units for efficient insertions/deletions.
@@ -197,48 +193,51 @@ def apply_snp_mutations(seq, generation, records):
         seq[idx] = new_base
         count += 1
 
-def d_values_to_position_weights(d_values, seq_length, repeat_size=178, window_size=100, scale_factor=30):
-    """Convert D2 values (per window) to position weights (per base pair).
+def d_values_to_repeat_weights(d_values, num_repeats, repeat_size=178, window_size=100, scale_factor=30):
+    """Convert D2 values (per window) to repeat unit weights.
+
+    This is much faster than base pair weights since we only create weights for
+    ~15K repeat units instead of ~2.67M base pairs.
 
     Args:
         d_values: Array of D2 values at each window position (computed on subsampled repeats)
-        seq_length: Length of sequence in base pairs
+        num_repeats: Number of repeat units in the sequence
         repeat_size: Size of each repeat unit (default: 178)
         window_size: Window size used for D2 calculation (default: 100)
         scale_factor: Subsampling scale factor used in identity matrix computation (default: 30)
 
     Returns:
-        weights: Array of weights for each base position (normalized to sum to 1)
+        weights: Array of weights for each repeat unit (normalized to sum to 1)
     """
     if d_values is None or len(d_values) == 0:
         # Uniform weights if no D2 values
-        return np.ones(seq_length) / seq_length
-
-    num_repeats = seq_length // repeat_size
+        return np.ones(num_repeats) / num_repeats
 
     # Calculate the subsampling factor
-    import math
     subsample_every = max(1, int(math.sqrt(num_repeats / scale_factor)))
 
     # Number of subsampled repeats
     num_subsampled = (num_repeats + subsample_every - 1) // subsample_every
 
-    # Each d_value corresponds to a window center position in SUBSAMPLED repeat units
-    # Window positions are 0, 1, 2, ... len(d_values)-1 in subsampled space
-    window_positions_subsampled = np.arange(len(d_values))
+    # Window centers in subsampled space (accounting for window_size/2 offset)
+    # First window center is at position window_size//2, last at num_subsampled - window_size//2 - 1
+    window_centers_subsampled = np.arange(len(d_values)) + window_size // 2
 
-    # Map back to original repeat unit indices
-    # Each subsampled index corresponds to (index * subsample_every) in original space
-    window_positions_repeats = window_positions_subsampled * subsample_every
+    # Map window centers back to original repeat unit indices
+    window_centers_repeats = window_centers_subsampled * subsample_every
 
-    # Map to base pair positions
-    bp_window_positions = window_positions_repeats * repeat_size
+    # Create weights array initialized to zero (regions outside valid windows)
+    weights = np.zeros(num_repeats)
 
-    # Interpolate d_values to all base positions
-    bp_positions = np.arange(seq_length)
+    # Determine valid region (where we have window coverage)
+    valid_start = 0
+    valid_end = num_repeats
 
-    # Use linear interpolation, extrapolate at edges
-    weights = np.interp(bp_positions, bp_window_positions, d_values)
+    # Interpolate d_values only within the valid region
+    repeat_positions = np.arange(num_repeats)
+
+    # Use linear interpolation within range, zero outside
+    weights = np.interp(repeat_positions, window_centers_repeats, d_values, left=0.0, right=0.0)
 
     # Ensure non-negative and normalize
     weights = np.maximum(weights, 0.01)  # Small minimum to avoid zero probability
@@ -267,26 +266,28 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
     target = np.random.poisson(0.5)
     consecutive_failures = 0
 
-    # Track initial sequence length for weight recalculation
-    initial_seq_length = len(seq)
+    # Track number of repeats for weight recalculation (much faster than tracking all bp!)
     weights = None
-    cached_weights_length = 0
+    cached_num_repeats = 0
 
     while count < target:
         seq_length = len(seq)
+        num_repeats = seq_length // repeat_size
 
-        # Recompute weights if sequence length has changed or not yet computed
+        # Recompute weights if number of repeats has changed or not yet computed
         if d_values is not None and d2_bias_strength > 0:
-            if weights is None or seq_length != cached_weights_length:
-                weights = d_values_to_position_weights(d_values, seq_length, repeat_size)
+            if weights is None or num_repeats != cached_num_repeats:
+                # Create weights for repeat units (15K elements) not base pairs (2.67M elements)!
+                weights = d_values_to_repeat_weights(d_values, num_repeats, repeat_size)
                 # Apply bias strength: raise weights to power
                 weights = weights ** d2_bias_strength
                 weights = weights / np.sum(weights)  # Renormalize
-                cached_weights_length = seq_length
+                cached_num_repeats = num_repeats
 
-        # Pick a character position based on D2-weighted probability
+        # Pick a repeat unit based on D2-weighted probability, then convert to base position
         if weights is not None:
-            char_start = np.random.choice(seq_length, p=weights)
+            repeat_idx = np.random.choice(num_repeats, p=weights)
+            char_start = repeat_idx * repeat_size
         else:
             # Uniform random position (original behavior)
             char_start = random.randint(0, seq_length - 1)
@@ -354,53 +355,61 @@ def initialize_cenh3_occupancy(num_units):
 
     return cenh3_occupancy
 
-def compute_correlation_dimension(seq, repeat_len=178, r_min=0.01, r_max=0.5, n_radii=50, window_size=100):
-    """Compute correlation dimension (D2) values from a RepeatSequence object or string.
+def compute_correlation_dimension(seq, repeat_len=178, window_size=100, scale_factor=30, invert=True):
+    """Compute correlation dimension (D2) values using fast C-based kmer diversity analysis.
+
+    This implementation uses the kmer_variance C library to compute diversity values
+    across sliding windows of repeat units. The repeat array is subsampled to improve
+    performance on large sequences.
 
     Args:
         seq: RepeatSequence object or string sequence
-        repeat_len: Length of each repeat unit (default: 178)
-        r_min: Minimum radius value (default: 0.01)
-        r_max: Maximum radius value (default: 0.5)
-        n_radii: Number of radius values (default: 50)
-        window_size: Sliding window size (default: 100)
+        repeat_len: Length of each repeat unit in bp (default: 178)
+        window_size: Sliding window size for diversity calculation (default: 100)
+        scale_factor: Subsampling scale factor - higher values = more subsampling (default: 30)
+        invert: If True, return 1-diversity for correlation dimension; if False, return raw diversity (default: True)
 
     Returns:
-        np.array: D2 values at each window position
+        np.array: D2 values (or diversity if invert=False) at each window position, normalized to [0, 1]
     """
-    # Convert RepeatSequence to string if needed
-    if isinstance(seq, str):
-        mutated_sequence = seq
+    # Handle RepeatSequence objects efficiently (direct bytearray access)
+    if isinstance(seq, RepeatSequence):
+        # Work directly with internal bytearrays - no string conversion needed!
+        n_repeats = seq.num_units()
+        subsample_every = max(1, int(math.sqrt(n_repeats / scale_factor)))
+
+        # Subsample units directly (seq.units is already list of bytearrays)
+        subsampled_units = seq.units[::subsample_every]
+
+        # Convert bytearrays directly to numpy (skip string encode/decode overhead)
+        sequences = np.array(subsampled_units, dtype=np.uint8)
     else:
-        mutated_sequence = seq.to_string()
+        # Handle string input (less common path)
+        n_repeats = len(seq) // repeat_len
+        repeats = [seq[i*repeat_len:(i+1)*repeat_len] for i in range(n_repeats)]
 
-    # Parse sequence into repeats
-    n_repeats = len(mutated_sequence) // repeat_len
-    repeats = [mutated_sequence[i*repeat_len:(i+1)*repeat_len] for i in range(n_repeats)]
+        subsample_every = max(1, int(math.sqrt(n_repeats / scale_factor)))
+        subsampled_repeats = repeats[::subsample_every]
 
-    # Compute identity matrix with subsampling (using optimized numba version)
-    identity_matrix = all_vs_all_identity_numba(repeats, scale_factor=30, max_exact_size=1000)
+        # Convert strings to numpy array
+        sequences = np.array([list(r.encode('ascii')) for r in subsampled_repeats], dtype=np.uint8)
 
-    # Convert to distance matrix
-    D = hamming_distance_matrix(identity_matrix)
+    # Calculate diversity using the fast C library
+    diversity = calculate_diversity(sequences, window_size=window_size)
 
-    # Choose radii
-    r_values = np.linspace(r_min, r_max, n_radii)
-
-    # Compute sliding window local correlation
-    positions, mean_corr = sliding_window_local_correlation(
-        D, window_size, r_values
-    )
-
-    # Compute D2 values at each window position using vectorized batch processing
-    # Pre-compute log(r_values) once for performance
-    log_r_values = np.log(r_values)
-    d_values = estimate_D2_from_C_r_batch(r_values, mean_corr, log_r=log_r_values)
+    if invert:
+        # Invert diversity to get correlation dimension (D2)
+        # Higher diversity → lower D2 (more chaotic/random)
+        # Lower diversity → higher D2 (more structured/correlated)
+        d_values = 1.0 - diversity
+    else:
+        # Return raw diversity values
+        d_values = diversity
 
     return d_values
 
 
-def introduce_mutations(sequence, generation, num_generations, repeat_size=178, use_d2_bias=False, d2_bias_strength=1.0):
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178, use_d2_bias=False, d2_bias_strength=1.0, invert_d2=True):
     """Introduce mutations into sequence over multiple generations.
 
     Args:
@@ -410,6 +419,7 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         repeat_size: Size of each repeat unit in bp (default: 178)
         use_d2_bias: Whether to bias insertion locations by D2 values (default: False)
         d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
+        invert_d2: If True, use 1-diversity for D2; if False, use raw diversity (default: True)
 
     Returns:
         tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_history, d_values_latest)
@@ -449,7 +459,7 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
 
         # Compute correlation dimension if d2_bias is enabled
         if use_d2_bias:
-            d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size)
+            d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size, invert=invert_d2)
             d_values_history.append(d_values_latest)
 
         if collapsed:

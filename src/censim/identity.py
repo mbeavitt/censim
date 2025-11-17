@@ -130,7 +130,7 @@ def all_vs_all_identity_numba(repeats, max_exact_size=1000, scale_factor=30, use
     return identity_matrix
 
 
-def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
+def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30, return_subsampled=False):
     """
     Compute all vs all identity matrix using scipy's pdist with adaptive subsampling.
 
@@ -141,9 +141,11 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
         repeats: list of sequences (strings)
         max_exact_size: array size threshold for exact computation (default: 1000)
         scale_factor: scaling factor for subsampling (default: 30)
+        return_subsampled: if True, returns (identity_matrix, subsampled_repeats) tuple (default: False)
 
     Returns:
-        numpy array of shape (n_repeats, n_repeats) with pairwise identities
+        If return_subsampled=False: numpy array of shape (n_repeats, n_repeats) with pairwise identities
+        If return_subsampled=True: tuple of (identity_matrix, subsampled_repeats_list)
     """
     n_repeats = len(repeats)
 
@@ -165,6 +167,7 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
             seq_array[i] = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)
         distances = pdist(seq_array, metric='hamming')
         identity_matrix = 1 - squareform(distances)
+        used_repeats = repeats
     else:
         # Subsampled computation (no interpolation)
         subset_indices = np.arange(0, n_repeats, subsample_every)
@@ -177,5 +180,11 @@ def all_vs_all_identity_scipy(repeats, max_exact_size=1000, scale_factor=30):
             seq_array[i] = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)
         distances = pdist(seq_array, metric='hamming')
         identity_matrix = 1 - squareform(distances)
+        used_repeats = subset_repeats
 
-    return identity_matrix.astype(np.float32)
+    identity_matrix = identity_matrix.astype(np.float32)
+
+    if return_subsampled:
+        return identity_matrix, used_repeats
+    else:
+        return identity_matrix
