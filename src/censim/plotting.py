@@ -3,6 +3,10 @@ Simplified plotting functions for centromere simulation visualization.
 """
 
 import numpy as np
+
+import matplotlib
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 from scipy.ndimage import rotate
 
