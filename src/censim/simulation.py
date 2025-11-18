@@ -459,6 +459,12 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
             d2_bias_strength=d2_bias_strength
         )
 
+        # Check if array has become too small
+        if seq.num_units() < 300:
+            print(f"Simulation complete: Array too small ({seq.num_units()} repeats)")
+            collapsed = True
+            break
+
         # Compute correlation dimension if d2_bias is enabled
         if use_d2_bias:
             d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size, invert=invert_d2)
