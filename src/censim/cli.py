@@ -44,12 +44,16 @@ def main():
         help="Save output every N generations"
     )
     parser.add_argument(
-        "--d2-bias", action="store_true",
-        help="Bias insertion locations toward high D2 regions (automatically enables correlation dimension calculations)"
+        "--link-dups", action="store_true",
+        help="Link duplications to D2 values (automatically enables correlation dimension calculations)"
     )
     parser.add_argument(
-        "--d2-bias-strength", type=float, default=1.0,
-        help="Strength of D2 bias (0=uniform, 1=linear, >1=stronger)"
+        "--link-dels", action="store_true",
+        help="Link deletions to D2 values (automatically enables correlation dimension calculations)"
+    )
+    parser.add_argument(
+        "--link-strength", type=float, default=1.0,
+        help="Strength of D2 bias for linked events (0=uniform, 1=linear, >1=stronger)"
     )
     parser.add_argument(
         "--inverted-d", action="store_true",
@@ -124,8 +128,9 @@ def main():
             current_sequence,
             generation - args.checkpoint_interval,
             args.checkpoint_interval,
-            use_d2_bias=args.d2_bias,
-            d2_bias_strength=args.d2_bias_strength,
+            link_dups=args.link_dups,
+            link_dels=args.link_dels,
+            link_strength=args.link_strength,
             invert_d2=not args.inverted_d  # Flag set = use raw diversity (invert=False)
         )
 
@@ -156,6 +161,7 @@ def main():
             import numpy as np
 
             # Compute d_values if not already available (with same subsampling as will be used for matrix)
+            # d_values are only computed automatically if link_dups or link_dels is enabled
             if d_values_latest is None:
                 d_values_latest = compute_correlation_dimension(
                     mutated_sequence,

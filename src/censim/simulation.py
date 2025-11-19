@@ -246,7 +246,7 @@ def d_values_to_repeat_weights(d_values, num_repeats, repeat_size=178, window_si
     return weights
 
 
-def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000, d_values=None, d2_bias_strength=1.0):
+def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=178, max_retries=5000, d_values=None, link_strength=1.0, link_dups=False, link_dels=False):
     """Apply INDEL mutations (tandem duplications/deletions) at arbitrary character positions.
 
     Args:
@@ -257,7 +257,9 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
         repeat_size: Size of each repeat unit in bp (default: 178)
         max_retries: Maximum number of consecutive failures before signaling collapse (default: 5000)
         d_values: Optional D2 values to bias insertion locations (higher D2 = more likely)
-        d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger bias)
+        link_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger bias)
+        link_dups: Whether to link duplications to D2 values (default: False)
+        link_dels: Whether to link deletions to D2 values (default: False)
 
     Returns:
         bool: True if array collapsed, False otherwise
@@ -272,26 +274,30 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
     while count < target:
         seq_length = len(seq)
-        num_repeats = seq_length // repeat_size
 
         # Recompute weights if number of repeats has changed or not yet computed
-        if d_values is not None and d2_bias_strength > 0:
-            if weights is None or num_repeats != cached_num_repeats:
+        if d_values is not None and link_strength > 0 and (link_dups or link_dels):
+            if weights is None or seq.num_units() != cached_num_repeats:
                 # Create weights for repeat units (15K elements) not base pairs (2.67M elements)!
-                weights = d_values_to_repeat_weights(d_values, num_repeats, repeat_size)
+                weights = d_values_to_repeat_weights(d_values, seq.num_units(), repeat_size)
                 # Apply bias strength: raise weights to power
-                weights = weights ** d2_bias_strength
+                weights = weights ** link_strength
                 weights = weights / np.sum(weights)  # Renormalize
-                cached_num_repeats = num_repeats
+                cached_num_repeats = seq.num_units()
 
         indel_type = random.choice(["DUP", "DEL"])
 
         # Pick a repeat unit based on D2-weighted probability, then convert to base position
-        if weights is not None:
-            if indel_type == "DUP":
-                repeat_idx = np.random.choice(num_repeats, p=weights)
-            else:
-                repeat_idx = np.random.choice(num_repeats)
+        # Use weights if:
+        # - This is a DUP and link_dups is True, OR
+        # - This is a DEL and link_dels is True
+        use_weights = weights is not None and (
+            (indel_type == "DUP" and link_dups) or
+            (indel_type == "DEL" and link_dels)
+        )
+
+        if use_weights:
+            repeat_idx = np.random.choice(seq.num_units(), p=weights)
             char_start = repeat_idx * repeat_size
         else:
             # Uniform random position (original behavior)
@@ -300,8 +306,8 @@ def apply_indel_mutations(seq, generation, records, indel_records, repeat_size=1
 
         # Sample indel size in base pairs from Poisson distribution
         # Size is always in multiples of repeat_size to maintain frame
-        num_repeats = max(1, int(np.random.poisson(7.6)))
-        indel_size_bp = num_repeats * repeat_size
+        indel_num_repeats = max(1, int(np.random.poisson(7.6)))
+        indel_size_bp = indel_num_repeats * repeat_size
         char_end = char_start + indel_size_bp
 
         # Bounds check: ensure end position is within sequence
@@ -413,7 +419,7 @@ def compute_correlation_dimension(seq, repeat_len=178, window_size=100, scale_fa
     return d_values
 
 
-def introduce_mutations(sequence, generation, num_generations, repeat_size=178, use_d2_bias=False, d2_bias_strength=1.0, invert_d2=True):
+def introduce_mutations(sequence, generation, num_generations, repeat_size=178, link_dups=False, link_dels=False, link_strength=1.0, invert_d2=True):
     """Introduce mutations into sequence over multiple generations.
 
     Args:
@@ -421,14 +427,15 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
         generation: Starting generation number
         num_generations: Number of generations to simulate
         repeat_size: Size of each repeat unit in bp (default: 178)
-        use_d2_bias: Whether to bias insertion locations by D2 values (default: False)
-        d2_bias_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
+        link_dups: Whether to link duplications to D2 values (default: False)
+        link_dels: Whether to link deletions to D2 values (default: False)
+        link_strength: Strength of D2 bias (0=uniform, 1=linear, >1=stronger, default: 1.0)
         invert_d2: If True, use 1-diversity for D2; if False, use raw diversity (default: True)
 
     Returns:
         tuple: (mutated_sequence, mutation_records, cenh3_occupancy, collapsed, d_values_latest)
             where collapsed is True if the array collapsed to zero, False otherwise
-            d_values_latest is the most recent d_values array (or None if use_d2_bias=False)
+            d_values_latest is the most recent d_values array (or None if link_dups and link_dels are both False)
     """
     # Use RepeatSequence for ~178x faster insertions/deletions
     seq = RepeatSequence(sequence, repeat_size)
@@ -449,14 +456,16 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
 
         # Determine which d_values to use for biasing (if enabled)
         d_values_for_bias = None
-        if use_d2_bias and d_values_latest is not None:
+        if (link_dups or link_dels) and d_values_latest is not None:
             d_values_for_bias = d_values_latest
 
         # Check if array collapsed during INDEL mutations
         collapsed = apply_indel_mutations(
             seq, generation, records, [], repeat_size,
             d_values=d_values_for_bias,
-            d2_bias_strength=d2_bias_strength
+            link_strength=link_strength,
+            link_dups=link_dups,
+            link_dels=link_dels
         )
 
         # Check if array has become too small
@@ -465,8 +474,8 @@ def introduce_mutations(sequence, generation, num_generations, repeat_size=178, 
             collapsed = True
             break
 
-        # Compute correlation dimension if d2_bias is enabled
-        if use_d2_bias:
+        # Compute correlation dimension if either link option is enabled
+        if link_dups or link_dels:
             d_values_latest = compute_correlation_dimension(seq, repeat_len=repeat_size, invert=invert_d2)
 
         if collapsed:
