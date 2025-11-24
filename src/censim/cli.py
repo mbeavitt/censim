@@ -5,6 +5,7 @@ Simple CLI for running centromere evolution simulations.
 
 import argparse
 import os
+import subprocess
 from pathlib import Path
 
 from censim.simulation import read_sequence, introduce_mutations
@@ -63,14 +64,24 @@ def main():
         "--plots", action="store_true",
         help="Generate plots at each checkpoint (default: False)"
     )
+    parser.add_argument(
+        "--save-records", action="store_true",
+        help="Save mutation records to text files (default: False)"
+    )
+    parser.add_argument(
+        "--save-cenh3", action="store_true",
+        help="Save CENH3 occupancy to text files (default: False)"
+    )
 
     args = parser.parse_args()
 
     # Create output directories
     output_base = Path(args.output_dir)
     os.makedirs(output_base / "fasta", exist_ok=True)
-    os.makedirs(output_base / "records", exist_ok=True)
-    os.makedirs(output_base / "cenh3", exist_ok=True)
+    if args.save_records:
+        os.makedirs(output_base / "records", exist_ok=True)
+    if args.save_cenh3:
+        os.makedirs(output_base / "cenh3", exist_ok=True)
     if args.plots:
         os.makedirs(output_base / "plots", exist_ok=True)
 
@@ -135,25 +146,34 @@ def main():
         )
 
         # Write output files
-        fasta_output = output_base / "fasta" / f"{generation}generation.out.fa"
+        fasta_output = output_base / "fasta" / "all_generations.out.fa.gz"
         record_output = output_base / "records" / f"{generation}generation.record.txt"
         cenh3_output = output_base / "cenh3" / f"{generation}generation.cenh3.txt"
 
-        # Write FASTA file with header
-        with open(fasta_output, "w") as f:
-            f.write(f">centro_{generation}gen\n")
-            f.write(mutated_sequence + '\n')
+        # Append to compressed FASTA file via gzip subprocess
+        with subprocess.Popen(
+            ["gzip", "-c", "-"],
+            stdin=subprocess.PIPE,
+            stdout=open(fasta_output, "ab"),
+            text=True
+        ) as proc:
+            proc.stdin.write(f">centro_{generation}gen\n")
+            proc.stdin.write(mutated_sequence + '\n')
+            proc.stdin.close()
+            proc.wait()
 
-        # Write mutation records
-        with open(record_output, "w") as f:
-            for record in mutation_records:
-                gen, mut_type, idx, ref, mut, copy_num = record
-                f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
+        # Write mutation records (optional)
+        if args.save_records:
+            with open(record_output, "w") as f:
+                for record in mutation_records:
+                    gen, mut_type, idx, ref, mut, copy_num = record
+                    f.write(f"{gen}, {mut_type}, {idx}, {ref}, {mut}, {copy_num}\n")
 
-        # Write CENH3 occupancy
-        with open(cenh3_output, "w") as f:
-            for idx, occupied in enumerate(cenh3_occupancy):
-                f.write(f"{idx}\t{1 if occupied else 0}\n")
+        # Write CENH3 occupancy (optional)
+        if args.save_cenh3:
+            with open(cenh3_output, "w") as f:
+                for idx, occupied in enumerate(cenh3_occupancy):
+                    f.write(f"{idx}\t{1 if occupied else 0}\n")
 
         # Generate plot if enabled
         if args.plots:
