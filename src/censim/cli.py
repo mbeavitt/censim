@@ -175,6 +175,13 @@ def main():
                 for idx, occupied in enumerate(cenh3_occupancy):
                     f.write(f"{idx}\t{1 if occupied else 0}\n")
 
+        print("done")
+
+        # Check for collapse
+        if collapsed:
+            print(f"\nSimulation ended at generation {generation} due to array collapse")
+            break
+
         # Generate plot if enabled
         if args.plots:
             from censim.simulation import compute_correlation_dimension
@@ -199,13 +206,6 @@ def main():
                 generation,
                 str(plot_output)
             )
-
-        print("done")
-
-        # Check for collapse
-        if collapsed:
-            print(f"\nSimulation ended at generation {generation} due to array collapse")
-            break
 
         # Update current sequence for next iteration
         current_sequence = mutated_sequence
